@@ -68,6 +68,24 @@ def head_transform(f_read, f_write):
         fw.writelines(data)
 
 
+def correct_time_head_filter():
+    " re-order time; not test yet "
+    import pandas as pd
+    import codecs
+    name_d = "/home/foucault/data/sourcedata/eprime_merged_proc"
+    p = Path(name_d)
+    f_list = list(p.glob('**/head_filter.csv'))
+    for i_file in f_list:
+        df = pd.read_csv(i_file, sep='\t')
+        # but just do this while reading df at run-time
+        # read_eprime_csv
+        _df = df.sort_values(by=['SessionTime'])
+        f_write = i_file.parent.joinpath("head_filter_tc.csv")
+        _df.to_csv(f_write.as_posix())
+        __import__('IPython').embed()
+        __import__('sys').exit()
+
+
 def read_lines():
     " devp "
     import codecs
@@ -244,19 +262,21 @@ def define_id_list():
                120, 121, 122, 123, 124, 125, 126, 127, 128, 201, 202, 203,
                204, 205, 206, 208, 209, 210, 212, 214, 215, 216, 217, 218,
                219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230]
-    exclude_list = ['108', '116', '119', '120', '122', '126', '202',
-                    '203', '206', '210', '223', '228']
+    exclude_list = ['108', '116', '119', '120', '122', '202',
+                    '203', '206', '210', '223']
+    data_concated_dict = {'126': concatenate_raw_sub126,
+                          '228': concatenate_raw_sub228}
     # '108' Count by Spat: 42, Count by Temp: 63
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-116/meg/sub-116_task-EM_meg.con'
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-119/meg/sub-119_task-EM_meg.con'
-    # 120 connection of data; data not continuous collected
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-122/meg/sub-122_task-EM_meg.con'
-    # 126 connection of data; not identified sequence
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-202/meg/sub-202_task-EM_meg.con'
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-203/meg/sub-203_task-EM_meg.con'
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-206/meg/sub-206_task-EM_meg.con'
     # [Errno 2] No such file or directory: '/home/foucault/data/rawdata/working_memory/sub-210/meg/sub-210_task-EM_meg.con'
     # 223 no temporal task
+    # 120 connection of data; data not continuous collected
+    # 126 connection of data; not identified sequence
     # 228 connection of data; seq
 
     # 205 ica.exclude = ica.labels_['blink'], KeyError: 'blink'
@@ -267,7 +287,16 @@ def define_id_list():
     # 227 ica.exclude = ica.labels_['blink'], KeyError: 'blink'
     # __import__('IPython').embed()
     # __import__('sys').exit()
-    return id_list, exclude_list
+    return id_list, exclude_list, data_concated_dict
+
+
+def define_id_by_aging_dict():
+    young_list = [104, 106, 108, 111, 112, 113, 114, 115, 116, 117, 118, 119,
+                  120, 121, 122, 123, 124, 125, 126, 127, 128]
+    elder_list = [201, 202, 203, 204, 205, 206, 208, 209, 210, 212, 214, 215,
+                  216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227,
+                  228, 229, 230]
+    return {'young': young_list, 'elder': elder_list}
 
 
 def extract_id_array():
@@ -359,6 +388,8 @@ def read_eprime_csv(sub_index=None):
     print(f"{i_file}")
     #i_file = list(p.glob(f'SUBJECT_{subject_id}/head_filter.csv'))
     df = pd.read_csv(i_file, sep='\t')
+    # re-order by time
+    df = df.sort_values(by=['SessionTime'])
     count = 0
     for i in df['ExperimentName']:
         if 'Spat' in i:
@@ -369,16 +400,131 @@ def read_eprime_csv(sub_index=None):
         if 'Temp' in i:
             count += 1
     logger.info(f"Count by Temp: {count}") # n=63
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
     return df
 
 
-def devp_concatenate_raw():
-    " not implemented "
-    task_selected='spatial'
-    raw, events, event_id, raw_em = devp_read_raw_bids(sub_index=12, task_selected=None)
+def concatenate_raw_sub126(task_selected):
+    """ for sub-id 18, the sequence is 213 """
+    import mne
+    if task_selected == 'spatial':
+        task=['0012Spat02', '0013Spat0103']
+        # look at temporal task sequence
+        raw, events, event_id, raw_em = \
+            devp_read_raw_bids_by_task(sub_index=18, task=task[0])
+        raw_, events_, event_id_, raw_em_ = \
+            devp_read_raw_bids_by_task(sub_index=18, task=task[1])
+        new_raw = raw.copy()
+        new_raw = mne.io.concatenate_raws([new_raw.load_data(), raw_.load_data()])
+        new_raw._init_kwargs['input_fname'] = raw._init_kwargs['input_fname'][:70]+'2Spat020103_meg.con'
+        events = mne.find_events(new_raw, 'STI 014', consecutive=True, min_duration=1,
+                                initial_event=True)
+        event_id = list(np.unique(events[:,2]))
+    else:
+        sub_index = 18
+        new_raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
+    return new_raw, events, event_id, raw_em
+
+
+def concatenate_raw_sub228(task_selected):
+    """ for sub-id 45, the sequence is 213 """
+    import mne
+    if task_selected == 'spatial':
+        task=['0012Spat0102', '0014Spat03']
+        # look at temporal task sequence
+        raw, events, event_id, raw_em = \
+            devp_read_raw_bids_by_task(sub_index=45, task=task[0])
+        raw_, events_, event_id_, raw_em_ = \
+            devp_read_raw_bids_by_task(sub_index=45, task=task[1])
+        new_raw = raw.copy()
+        new_raw = mne.io.concatenate_raws([new_raw.load_data(), raw_.load_data()])
+        new_raw._init_kwargs['input_fname'] = raw._init_kwargs['input_fname'][:70]+'001Spat010203_meg.con'
+        events = mne.find_events(new_raw, 'STI 014', consecutive=True, min_duration=1,
+                                initial_event=True)
+        event_id = list(np.unique(events[:,2]))
+    else:
+        sub_index = 45
+        new_raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
+    return new_raw, events, event_id, raw_em
+
+
+def devp_read_raw_bids_by_task(sub_index=None, task=None):
+    """ for concatenate data """
+    df = read_id_task_dict()
+    root_dir = "/home/foucault/data/rawdata/working_memory"
+    column = ['sub_id', '0', '1', '2']
+    subject_id = str(df[column[0]][sub_index])
+    if sub_index == None:
+        sub_index = 0
+    # task_desc_dict = dict(zip(['subject', 'spatial', 'temporal', 'mis'], column))
+    # if task_selected == None:
+        # task_selected = 'spatial'
+        # #task_selected = 'temporal'
+    # task = df[task_desc_dict[task_selected]][sub_index]
+    # #task = df[column[1]][sub_index]
+    bids_basename = make_bids_basename(
+        subject=subject_id, session=None, task=task, run=None)
+    bids_basename_em = make_bids_basename(
+        subject=subject_id, session=None, task='EM', run=None)
+    raw_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_meg.con'
+    mrk_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_markers.mrk'
+    elp_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_elp.elp'
+    hsp_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_hsp.hsp'
+    raw_em_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename_em+'_meg.con'
+    print(bids_basename)
+    raw = mne.io.read_raw_kit(input_fname=raw_f, mrk=mrk_f, elp=elp_f,
+        hsp=hsp_f, allow_unknown_format=True)
+    raw_em = mne.io.read_raw_kit(input_fname=raw_em_f, mrk=mrk_f, elp=elp_f,
+        hsp=hsp_f, allow_unknown_format=True)
+    events = mne.find_events(raw, 'STI 014', consecutive=True, min_duration=1,
+                             initial_event=True)
+    #events = mne.find_events(raw, 'STI 014', consecutive=True)
+    event_id = list(np.unique(events[:,2]))
+    #epochs = mne.Epochs(raw, events, event_id)
+    return raw, events, event_id, raw_em
+    #return raw
 
 
 def devp_read_raw_bids(sub_index=None, task_selected=None):
+    df = read_id_task_dict()
+    root_dir = "/home/foucault/data/rawdata/working_memory"
+    column = ['sub_id', '0', '1', '2']
+    if sub_index == None:
+        sub_index = 0
+    task_desc_dict = dict(zip(['subject', 'spatial', 'temporal', 'mis'], column))
+    subject_id = str(df[column[0]][sub_index])
+    if task_selected == None:
+        task_selected = 'spatial'
+        #task_selected = 'temporal'
+    task = df[task_desc_dict[task_selected]][sub_index]
+    #task = df[column[1]][sub_index]
+    bids_basename = make_bids_basename(
+        subject=subject_id, session=None, task=task, run=None)
+    bids_basename_em = make_bids_basename(
+        subject=subject_id, session=None, task='EM', run=None)
+    raw_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_meg.con'
+    mrk_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_markers.mrk'
+    elp_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_elp.elp'
+    hsp_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename+'_hsp.hsp'
+    raw_em_f = root_dir+'/sub-'+subject_id+'/meg/'+bids_basename_em+'_meg.con'
+    print(bids_basename)
+    raw = mne.io.read_raw_kit(input_fname=raw_f, mrk=mrk_f, elp=elp_f,
+        hsp=hsp_f, allow_unknown_format=True)
+    raw_em = mne.io.read_raw_kit(input_fname=raw_em_f, mrk=mrk_f, elp=elp_f,
+        hsp=hsp_f, allow_unknown_format=True)
+    events = mne.find_events(raw, 'STI 014', consecutive=True, min_duration=1,
+                             initial_event=True)
+    #events = mne.find_events(raw, 'STI 014', consecutive=True)
+    event_id = list(np.unique(events[:,2]))
+    #epochs = mne.Epochs(raw, events, event_id)
+    __import__('IPython').embed()
+    __import__('sys').exit()
+    return raw, events, event_id, raw_em
+    #return raw
+
+
+def read_raw_bids(sub_index=None, task_selected=None):
     df = read_id_task_dict()
     root_dir = "/home/foucault/data/rawdata/working_memory"
     column = ['sub_id', '0', '1', '2']
@@ -433,9 +579,6 @@ def devp_plot_layout():
     layout = mne.channels.find_layout(raw.info)
     __import__('IPython').embed()
     __import__('sys').exit()
-
-
-
 
 
 def devp_epochs_filter_by_trial():
@@ -551,7 +694,12 @@ def epochs_filter_by_trial(sub_index=None, task_selected=None):
     if task_selected == None:
         task_selected = 'spatial'
         #task_selected = 'temporal'
-    raw, events, event_id, raw_em = devp_read_raw_bids(sub_index, task_selected)
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    if str(id_list[sub_index]) in data_concated_dict.keys():
+        raw, events, event_id, raw_em =\
+            data_concated_dict[str(id_list[sub_index])](task_selected)
+    else:
+        raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
     def plot_layout():
         channels_dict = {0: 'la', 1: 'lp', 2: 'ra', 3: 'rp'} # corr to partition dict
         i_key = 3
@@ -682,6 +830,7 @@ def additional_loop():
 
 
 def plot_gfp(sub_index=None, task_selected=None):
+    """ old version; devp; rename to build_individual_frequency_map_pkl """
     from mne.baseline import rescale
     from mne.stats import bootstrap_confidence_interval
     __import__('matplotlib').use('TkAgg')
@@ -730,7 +879,7 @@ def plot_gfp(sub_index=None, task_selected=None):
             epochs.apply_hilbert(envelope=True)
         frequency_map.append(((band, fmin, fmax), epochs.average()))
         del epochs
-    id_list, exclude_list = define_id_list()
+    id_list, exclude_list, data_concated_dict = define_id_list()
     _file = f"sub-{id_list[sub_index]}_{task_selected}_frequency_map.pkl"
     save_list_pkl(frequency_map, _file)
     #frequency_map = load_list_pkl(_file)
@@ -771,10 +920,62 @@ def plot_gfp(sub_index=None, task_selected=None):
         #_plot_gfp()
 
 
-def build_grand_frequency_maps(sub_index=None, task_selected=None):
+def build_individual_frequency_map_pkl(sub_index=None, task_selected=None):
+    """ build_individual_frequency_map_pkl """
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    iter_freqs = [
+        ('Theta', 4, 7),
+        ('Alpha', 8, 12),
+        ('Beta', 13, 25),
+        ('Gamma', 30, 45)
+    ]
+    # set epoching parameters
+    event_id, tmin, tmax = 253, -0.1, 2
+    #baseline = (-0.1, 0)
+    baseline = None
+    if sub_index == None:
+        sub_index = 0
+    if task_selected == None:
+        #task_selected='spatial'
+        task_selected='temporal'
+
+    raw_, events = epochs_filter_by_trial(sub_index, task_selected)
+    frequency_map = list()
+    for band, fmin, fmax in iter_freqs:
+        # (re)load the data to save memory
+        raw = raw_.copy()
+        raw.pick_types(meg='mag')  # we just look at gradiometers
+
+        # bandpass filter
+        raw.filter(fmin, fmax, n_jobs=8,  # use more jobs to speed up.
+                   l_trans_bandwidth=1,  # make sure filter params are the same
+                   h_trans_bandwidth=1)  # in each band and skip "auto" option.
+
+        # epoch
+        epochs = mne.Epochs(raw, events, event_id, tmin, tmax, baseline=baseline,
+                            reject=dict(mag=1.5e-12),
+                            preload=True)
+        # remove evoked response
+        epochs.subtract_evoked()
+        # get analytic signal (envelope)
+        if epochs.events.size != 0:
+            epochs.apply_hilbert(envelope=True)
+        frequency_map.append(((band, fmin, fmax), epochs.average()))
+        del epochs
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    _file = f"sub-{id_list[sub_index]}_{task_selected}_frequency_map.pkl"
+    save_list_pkl(frequency_map, _file)
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+
+
+def devp_build_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
     import copy
     task_selected = ['spatial', 'temporal']
-    id_list, exclude_list = define_id_list()
+    id_list, exclude_list, data_concated_dict = define_id_list()
     frequency_maps = list()
     for task in task_selected:
         grand_frequency_map = list()
@@ -817,6 +1018,79 @@ def build_grand_frequency_maps(sub_index=None, task_selected=None):
         _file = f"grand_{task}_frequency_map.pkl"
         save_list_pkl(grand_frequency_map, _file)
         logger.info(f"#participants in task_{task}: {count}")
+
+
+def append_frequency_map(id_list, task):
+    import copy
+    _id_list, exclude_list, data_concated_dict = define_id_list()
+    grand_frequency_map = list()
+    #frequency_maps = list()
+    # if task == 'temporal':
+        # continue
+    count = 0
+    # for i in range(1):
+        # sub_index = 16
+    # for sub_index in range(0, 2):
+        #sub_index = 16
+    for sub_index in range(0, len(id_list)):
+        logger.info(f"sub_index: {sub_index}; sub-{id_list[sub_index]}")
+        logger.info(f"task: {task}")
+        if str(id_list[sub_index]) in exclude_list:
+            logger.info(f"excluding id:{id_list[sub_index]}")
+            continue
+        _file = f"sub-{id_list[sub_index]}_{task}_frequency_map.pkl"
+        frequency_map = load_list_pkl(_file)
+        #frequency_maps.append(frequency_map)
+        count += 1
+        if count == 1:
+            grand_frequency_map = copy.deepcopy(frequency_map)
+            for i, f_band in enumerate(frequency_map):
+                if np.isnan(frequency_map[i][1].data).any():
+                    grand_frequency_map[i][1].data = \
+                        np.zeros(frequency_map[i][1].data.shape)
+                    grand_frequency_map[i][1].nave = 0
+                else:
+                    # reset nave to n=1 for grand average
+                    grand_frequency_map[i][1].nave = 1
+            continue
+        for i, f_band in enumerate(frequency_map):
+            if np.isnan(f_band[1].data[0][0]):
+                continue
+            grand_frequency_map[i][1].data += f_band[1].data
+            grand_frequency_map[i][1].nave += 1
+    # get average
+    for i in range(len(grand_frequency_map)):
+        grand_frequency_map[i][1].data /= grand_frequency_map[i][1].nave
+    logger.info(f"#participants in task_{task}: {count}")
+    return grand_frequency_map
+
+
+def build_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
+    import copy
+    task_selected = ['spatial', 'temporal']
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    aging_dict = define_id_by_aging_dict()
+    for task in task_selected:
+        grand_frequency_map = append_frequency_map(id_list, task)
+        _file = f"grand_{task}_frequency_map.pkl"
+        save_list_pkl(grand_frequency_map, _file)
+
+
+def build_aging_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
+    """Maps divided by young and elder groups """
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    aging_dict = define_id_by_aging_dict()
+    for i in aging_variable:
+        if i == 'young':
+            continue
+        for task in task_selected:
+            # if task == 'spatial':
+                # continue
+            grand_frequency_map = append_frequency_map(aging_dict[i], task)
+            _file = f"{i}_grand_{task}_frequency_map.pkl"
+            save_list_pkl(grand_frequency_map, _file)
 
 
 def devp_plot_grand_gfp():
@@ -879,8 +1153,7 @@ def ch_di_list():
     return (ch_l_list, ch_r_list), (ch_a_list, ch_p_list)
 
 
-def devp_plot_di_grand_gfp():
-    # Plot
+def plot_grand_gfp(task, file_r, aging_label=None):
     from mne.baseline import rescale
     from mne.stats import bootstrap_confidence_interval
     __import__('matplotlib').use('TkAgg')
@@ -889,50 +1162,63 @@ def devp_plot_di_grand_gfp():
         """Return sum of squares."""
         return np.sum(x ** 2, axis=0)
     chs_lr_pair, chs_ap_pair = ch_di_list()
-    chs_name = ['lr', 'ap']
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+        chs_name = ['lr', 'ap']
+        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+        colors = colors[[0,2],:] # take 0:green, 2:blue
+        for i_chs, chs in enumerate(chs_pairs):
+            frequency_map = load_list_pkl(file_r)
+            for i in range(len(frequency_map)):
+                frequency_map[i][1].pick_channels(chs)
+                print(f"{frequency_map[i][1]}")
+            for ((freq_name, fmin, fmax), average), ax in zip(
+                    frequency_map, axes.ravel()[::-1]):
+                times = average.times * 1e3
+                gfp = np.sum(average.data ** 2, axis=0)
+                gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                            stat_fun=stat_fun)
+                ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                ax.grid(True)
+                ax.set_ylabel('GFP')
+                ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
+                            xy=(0.95, 0.8),
+                            horizontalalignment='right',
+                            xycoords='axes fraction')
+                ax.set_xlim(-100, 2000)
+            axes.ravel()[-1].set_xlabel('Time [ms]')
+        if aging_label:
+            w_png = figures_d.joinpath(f"{aging_label}_grand_gfp_{task}_{chs_name[i_chs_pair]}_dpi.png")
+        else:
+            w_png = figures_d.joinpath(f"grand_gfp_{task}_{chs_name[i_chs_pair]}_dpi.png")
+        logger.info("saving file:")
+        logger.info(f"{w_png.as_posix()}")
+        fig.savefig(w_png, dpi=300)
+
+
+def plot_di_aging_grand_gfp():
+    # Plot
     task_selected = ['spatial', 'temporal']
-    for task in task_selected:
-        _file = f"grand_{task}_frequency_map.pkl"
-        for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
-            fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
-            colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
-            colors = colors[[1,3],:] # take 1, 3
-            for i_chs, chs in enumerate(chs_pairs):
-                frequency_map = load_list_pkl(_file)
-                for i in range(len(frequency_map)):
-                    frequency_map[i][1].pick_channels(chs)
-                    print(f"{frequency_map[i][1]}")
-                for ((freq_name, fmin, fmax), average), ax in zip(
-                        frequency_map, axes.ravel()[::-1]):
-                    times = average.times * 1e3
-                    gfp = np.sum(average.data ** 2, axis=0)
-                    gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
-                    ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
-                    ax.axhline(0, linestyle='--', color='grey', linewidth=2)
-                    ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
-                                                                stat_fun=stat_fun)
-                    ci_low = rescale(ci_low, average.times, baseline=(None, 0))
-                    ci_up = rescale(ci_up, average.times, baseline=(None, 0))
-                    ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
-                    ax.grid(True)
-                    ax.set_ylabel('GFP')
-                    ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
-                                xy=(0.95, 0.8),
-                                horizontalalignment='right',
-                                xycoords='axes fraction')
-                    ax.set_xlim(-100, 2000)
-                    #ax.set_xlim(-1000, 3000)
-                axes.ravel()[-1].set_xlabel('Time [ms]')
-                #w_png = f"gfp_{task_selected}_b_s1.png"
-            w_png = f"grand_gfp_{task}_{chs_name[i_chs_pair]}.png"
-            logger.info(f"saving file: {w_png}")
-            fig.savefig(w_png)
-                #_plot_gfp()
+    aging_variable = ['young', 'elder']
+    for i in aging_variable:
+        if i == 'young':
+            continue
+        for task in task_selected:
+            # if task == 'spatial':
+                # continue
+            file_r = f"{i}_grand_{task}_frequency_map.pkl"
+            plot_grand_gfp(task, file_r, aging_label=i)
 
 
 def dd_plot_gfp():
     task_selected = ['spatial', 'temporal']
-    id_list, exclude_list = define_id_list()
+    id_list, exclude_list, data_concated_dict = define_id_list()
     for task in task_selected:
         # for i in range(1):
             # sub_index = 16
@@ -948,22 +1234,24 @@ def dd_plot_gfp():
     #plot_gfp(task_selected[1])
 
 
-def main_plot_gfp():
+def main_build_individual_frequency_map_pkl():
     task_selected = ['spatial', 'temporal']
-    id_list, exclude_list = define_id_list()
+    id_list, exclude_list, data_concated_dict = define_id_list()
     for task in task_selected:
-        if task == 'spatial':
-            continue
+        # if task == 'spatial':
+        # if task == 'temporal':
+            # continue
         # for i in range(1):
-            # sub_index = 16
-        for sub_index in range(0, 18):
-        #for sub_index in range(17, len(id_list)):
+            # sub_index = 24
+        # for sub_index in range(0, 18):
+        for sub_index in range(0, len(id_list)):
             logger.info(f"sub_index: {sub_index}; sub-{id_list[sub_index]}")
             logger.info(f"task: {task}")
             if str(id_list[sub_index]) in exclude_list:
                 logger.info(f"excluding id:{id_list[sub_index]}")
                 continue
-            plot_gfp(sub_index, task)
+            #plot_gfp(sub_index, task) #  old function
+            build_individual_frequency_map_pkl(sub_index, task)
         logger.info("Done!")
     #plot_gfp(task_selected[0])
     #plot_gfp(task_selected[1])
@@ -1012,12 +1300,15 @@ if __name__ == '__main__':
     #preprocess_pipeline()
     #devp_read_raw_bids()
     #read_eprime_csv()
+    #read_eprime_csv(sub_index=45)
     #plot_events_id()
     #plot_time()
     #sample_channels()
     #sample_channels_type()
     #read_csv2()
     #read_csv()
+    #read_csv3()
+    #correct_time_head_filter()
     #read_lines()
     #head_filter()
     #read_con()
@@ -1025,9 +1316,12 @@ if __name__ == '__main__':
     #build_id_task_dict()
     #epochs_filter_by_trial()
     #devp_gfp()
-    #main_plot_gfp()
     #devp_plot_layout()
     #devp_concatenate_raw()
-    #build_grand_frequency_maps()
     #devp_plot_grand_gfp()
-    devp_plot_di_grand_gfp()
+    # concatenate_raw_sub228()
+    # concatenate_raw_sub126()
+    # main_build_individual_frequency_map_pkl()
+    # build_grand_frequency_maps_pkl()
+    # build_aging_grand_frequency_maps_pkl()
+    plot_di_aging_grand_gfp()
