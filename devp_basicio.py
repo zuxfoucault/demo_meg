@@ -1,5 +1,6 @@
 import os
 import loggy
+import copy
 from pathlib import Path
 import pickle
 import mne
@@ -423,7 +424,7 @@ def concatenate_raw_sub126(task_selected):
         event_id = list(np.unique(events[:,2]))
     else:
         sub_index = 18
-        new_raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
+        new_raw, events, event_id, raw_em = _read_raw_bids(sub_index, task_selected)
     return new_raw, events, event_id, raw_em
 
 
@@ -445,7 +446,7 @@ def concatenate_raw_sub228(task_selected):
         event_id = list(np.unique(events[:,2]))
     else:
         sub_index = 45
-        new_raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
+        new_raw, events, event_id, raw_em = _read_raw_bids(sub_index, task_selected)
     return new_raw, events, event_id, raw_em
 
 
@@ -524,7 +525,7 @@ def devp_read_raw_bids(sub_index=None, task_selected=None):
     #return raw
 
 
-def read_raw_bids(sub_index=None, task_selected=None):
+def _read_raw_bids(sub_index=None, task_selected=None):
     df = read_id_task_dict()
     root_dir = "/home/foucault/data/rawdata/working_memory"
     column = ['sub_id', '0', '1', '2']
@@ -699,7 +700,7 @@ def epochs_filter_by_trial(sub_index=None, task_selected=None):
         raw, events, event_id, raw_em =\
             data_concated_dict[str(id_list[sub_index])](task_selected)
     else:
-        raw, events, event_id, raw_em = read_raw_bids(sub_index, task_selected)
+        raw, events, event_id, raw_em = _read_raw_bids(sub_index, task_selected)
     def plot_layout():
         channels_dict = {0: 'la', 1: 'lp', 2: 'ra', 3: 'rp'} # corr to partition dict
         i_key = 3
@@ -795,7 +796,9 @@ def epochs_filter_by_trial(sub_index=None, task_selected=None):
     return reconst_raw, events
 
 
-def save_list_pkl(_list, _file):
+def save_list_pkl(_list, _file, logger=None):
+    if logger is None:
+        logger = logger
     root_dir = Path('/home/foucault/data/derivatives/working_memory/intermediate')
     file_w = root_dir.joinpath(_file)
     logger.info('save file')
@@ -804,9 +807,11 @@ def save_list_pkl(_list, _file):
         pickle.dump(_list, f)
 
 
-def load_list_pkl(_file):
+def load_list_pkl(_file, logger=None):
     root_dir = Path('/home/foucault/data/derivatives/working_memory/intermediate')
     file_r = root_dir.joinpath(_file)
+    logger.info('load file')
+    logger.info(f'{file_r.as_posix()}')
     with open(file_r.as_posix(), 'rb') as f:
         _list = pickle.load(f)
     return _list
@@ -1020,7 +1025,7 @@ def devp_build_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
         logger.info(f"#participants in task_{task}: {count}")
 
 
-def append_frequency_map(id_list, task):
+def append_grand_frequency_map(id_list, task):
     import copy
     _id_list, exclude_list, data_concated_dict = define_id_list()
     grand_frequency_map = list()
@@ -1065,13 +1070,117 @@ def append_frequency_map(id_list, task):
     return grand_frequency_map
 
 
+def calculate_gfp(evoked):
+    times = evoked.times * 1e3
+    gfp = np.sum(evoked.data ** 2, axis=0)
+    gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+    return gfp
+
+
+def save_individual_frequency_gfp_aging_hemisphere_pkl(id_list, task):
+    """As function name """
+    _id_list, exclude_list, data_concated_dict = define_id_list()
+    chs_name = ['lr', 'ap']
+    #frequency_maps = list()
+    # if task == 'temporal':
+        # continue
+    # for i in range(1):
+        # sub_index = 16
+    # for sub_index in range(0, 2):
+        #sub_index = 16
+    for sub_index in range(0, len(id_list)):
+        logger.info(f"sub_index: {sub_index}; sub-{id_list[sub_index]}")
+        logger.info(f"task: {task}")
+        if str(id_list[sub_index]) in exclude_list:
+            logger.info(f"excluding id:{id_list[sub_index]}")
+            continue
+        file_r = f"sub-{id_list[sub_index]}_{task}_frequency_map.pkl"
+        chs_lr_pair, chs_ap_pair = ch_di_list()
+        for i_chs_pair, chs_pairs in enumerate([chs_lr_pair, chs_ap_pair]):
+            frequency_gfp = list()
+            for i_chs, chs in enumerate(chs_pairs):
+                frequency_map = load_list_pkl(file_r)
+                for i in range(len(frequency_map)):
+                    frequency_map[i][1].pick_channels(chs)
+                    """ frequency_gfp: ['l'*4 'r'*4] """
+                    """ frequency_gfp: ['a'*4 'p'*4] """
+                    frequency_gfp.append(calculate_gfp(frequency_map[i][1]))
+                    #print(f"{frequency_map[i][1]}")
+            # __import__('IPython').embed()
+            # __import__('sys').exit()
+            _file = f"sub-{id_list[sub_index]}_{task}_{chs_name[i_chs_pair]}_frequency_gfp.pkl"
+            save_list_pkl(frequency_gfp, _file)
+            # __import__('IPython').embed()
+            # __import__('sys').exit()
+
+
+def append_individual_frequency_gfp_aging_hemisphere_pkl(id_list, task):
+    _id_list, exclude_list, data_concated_dict = define_id_list()
+    iter_freqs = [
+        ('Theta', 4, 7),
+        ('Alpha', 8, 12),
+        ('Beta', 13, 25),
+        ('Gamma', 30, 45)]
+    gfp_dict = {i: [[], []] for i in iter_freqs}
+    chs_name = ['lr', 'ap']
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    ch_1 = {ch: [] for ch in ['l', 'r']}
+    ch_2 = {ch: [] for ch in ['a', 'p']}
+    _chs = {chs: copy.deepcopy((ch_1, ch_2)[i]) for i, chs in enumerate(chs_name)}
+    _band = {band: copy.deepcopy(_chs) for band in iter_freqs}
+    chs_dict = {chs: [] for chs in chs_name}
+    _gfp_pair_dict = {band: copy.deepcopy(chs_dict) for band in iter_freqs}
+    gfp_pair_dict = {band: copy.deepcopy(chs_dict) for band in iter_freqs}
+    #gfp_pair_dict = {i: [[], []] for i in iter_freqs}
+    #_task = {task: _chs for task in task_selected}
+    for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+        count_sub = 0
+        # if task == 'temporal':
+            # continue
+        # for i in range(1):
+            # sub_index = 16
+        # for sub_index in range(0, 2):
+            #sub_index = 16
+        _gfp_dict = {i: [[], []] for i in iter_freqs}
+        print("_gfp_pair_dict")
+        print(f"{_gfp_pair_dict}")
+        for sub_index in range(0, len(id_list)):
+            logger.info(f"sub_index: {sub_index}; sub-{id_list[sub_index]}")
+            logger.info(f"task: {task}")
+            if str(id_list[sub_index]) in exclude_list:
+                logger.info(f"excluding id:{id_list[sub_index]}")
+                continue
+            file_r = (f"sub-{id_list[sub_index]}_{task}_{chs_name[i_chs_pair]}"
+                      "_frequency_gfp.pkl")
+            logger.info("loading:")
+            logger.info(f"{file_r}")
+            frequency_gfp = load_list_pkl(file_r)
+            count_sub += 1
+            for i_band, band in enumerate(gfp_dict.keys()):
+                gfp_dict[band][0].append(frequency_gfp[i_band])
+                gfp_dict[band][1].append(frequency_gfp[i_band+4])
+                _gfp_dict[band][0].append(frequency_gfp[i_band])
+                _gfp_dict[band][1].append(frequency_gfp[i_band+4])
+                _gfp_pair_dict[band][chs_name[i_chs_pair]].append(
+                    frequency_gfp[i_band] - frequency_gfp[i_band+4])
+        for i_band, band in enumerate(gfp_dict.keys()):
+            gfp_pair_dict[band][chs_name[i_chs_pair]] = np.array(_gfp_pair_dict[band]
+                                                       [chs_name[i_chs_pair]])
+            for i_key, key in enumerate(_band[band][chs_name[i_chs_pair]].keys()):
+                _band[band][chs_name[i_chs_pair]][key] = np.array(_gfp_dict[band][i_key])
+    # print("gfp_dict here")
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+    logger.info(f"number of particiapnts: {count_sub}")
+    return _band, gfp_pair_dict, count_sub
+
+
 def build_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
-    import copy
     task_selected = ['spatial', 'temporal']
     id_list, exclude_list, data_concated_dict = define_id_list()
     aging_dict = define_id_by_aging_dict()
     for task in task_selected:
-        grand_frequency_map = append_frequency_map(id_list, task)
+        grand_frequency_map = append_grand_frequency_map(id_list, task)
         _file = f"grand_{task}_frequency_map.pkl"
         save_list_pkl(grand_frequency_map, _file)
 
@@ -1088,9 +1197,211 @@ def build_aging_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
         for task in task_selected:
             # if task == 'spatial':
                 # continue
-            grand_frequency_map = append_frequency_map(aging_dict[i], task)
+            grand_frequency_map = append_grand_frequency_map(aging_dict[i], task)
             _file = f"{i}_grand_{task}_frequency_map.pkl"
-            save_list_pkl(grand_frequency_map, _file)
+            save_list_pkl(frequency_map, _file)
+
+
+def save_individual_aging_frequency_gfp_dict(sub_index=None, task_selected=None):
+    """Maps divided by young and elder groups """
+    """Note: elder part has nan values """
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    chs_name = ['lr', 'ap']
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    aging_dict = define_id_by_aging_dict()
+    gfp_pair_task_dict = {i: [] for i in task_selected}
+    gfp_pair_aging_dict = {i: [] for i in aging_variable}
+    _task = {task: {} for task in task_selected}
+    gfp_aging_task_chs_dict = {aging: copy.deepcopy(_task) for aging in aging_variable}
+    for aging in aging_variable:
+        if aging == 'elder':
+            continue
+        logger.info(f"loop: {aging}")
+        for task in task_selected:
+            logger.info(f"loop: {task}")
+            # if task == 'spatial':
+                # continue
+            save_individual_frequency_gfp_aging_hemisphere_pkl(aging_dict[aging], task)
+
+
+def build_individual_aging_frequency_gfp_dict(sub_index=None, task_selected=None):
+    """Maps divided by young and elder groups """
+    """Note: elder part has nan values """
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    chs_name = ['lr', 'ap']
+    id_list, exclude_list, data_concated_dict = define_id_list()
+    aging_dict = define_id_by_aging_dict()
+    gfp_pair_task_dict = {i: [] for i in task_selected}
+    gfp_pair_aging_dict = {i: [] for i in aging_variable}
+    _task = {task: {} for task in task_selected}
+    gfp_aging_task_chs_dict = {aging: copy.deepcopy(_task) for aging in aging_variable}
+    for aging in aging_variable:
+        if aging == 'elder':
+            continue
+        logger.info(f"loop: {aging}")
+        for task in task_selected:
+            logger.info(f"loop: {task}")
+            # if task == 'spatial':
+                # continue
+            # save_individual_frequency_gfp_aging_hemisphere_pkl(aging_dict[aging], task)
+            # print("save_individual_frequency_gfp_aging_hemisphere_pkl")
+            # __import__('IPython').embed()
+            # __import__('sys').exit()
+            _band, gfp_pair_dict, count_sub = \
+                append_individual_frequency_gfp_aging_hemisphere_pkl(aging_dict[aging], task)
+            gfp_pair_task_dict[task].append(gfp_pair_dict)
+            # gfp_pair_task_dict[task][0][('Theta', 4, 7)][:count_sub]
+            # only young group
+            gfp_aging_task_chs_dict[aging][task] = _band
+        gfp_pair_aging_dict[aging] = gfp_pair_task_dict
+    #epochs_power = gfp_pair_task_dict[task][0][('Theta', 4, 7)][:count_sub]
+    #epochs_power = gfp_pair_task_dict[task][0][('Theta', 4, 7)]
+    # print("here")
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+    return gfp_pair_aging_dict, gfp_aging_task_chs_dict
+
+
+def calculate_permutation_cluster_1samp_test(epochs_power):
+    from mne.stats import permutation_cluster_1samp_test
+    #threshold = 2.5
+    #threshold = 3.0
+    threshold = 2.8
+    T_obs, clusters, cluster_p_values, H0 = \
+        permutation_cluster_1samp_test(epochs_power,
+            n_permutations=1000, threshold=threshold, tail=0)
+    return T_obs, clusters, cluster_p_values, H0
+
+
+def calculate_permutation_cluster_test(epochs_power):
+    from mne.stats import permutation_cluster_test
+    #threshold = 2.5
+    threshold = 6.0
+    T_obs, clusters, cluster_p_values, H0 = \
+        permutation_cluster_test(epochs_power,
+            n_permutations=1000, threshold=threshold, tail=0)
+    return T_obs, clusters, cluster_p_values, H0
+
+
+def collect_permutation_cluster_1samp_test():
+    """Organizing aging: task: channels """
+    iter_freqs = [
+        ('Theta', 4, 7),
+        ('Alpha', 8, 12),
+        ('Beta', 13, 25),
+        ('Gamma', 30, 45)]
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    chs_name = ['lr', 'ap']
+    gfp_dict = {band: [] for band in iter_freqs}
+    chs_dict = {chs: copy.deepcopy(gfp_dict) for chs in chs_name}
+    task_dict = {task: copy.deepcopy(chs_dict) for task in task_selected}
+    collection_dict = {aging: copy.deepcopy(task_dict) for aging in aging_variable}
+    gfp_pair_aging_dict, gfp_aging_task_chs_dict =\
+        build_individual_aging_frequency_gfp_dict()
+    for aging in collection_dict.keys():
+        if aging == 'elder':
+            continue
+        logger.info(f"loop: {aging}")
+        for task in task_dict.keys():
+            logger.info(f"loop: {task}")
+            for chs in chs_dict.keys():
+                logger.info(f"loop: {chs}")
+                for band in gfp_dict.keys():
+                    logger.info(f"loop: {band}")
+                    epochs_power = \
+                        gfp_pair_aging_dict[aging][task][0][band][chs]
+                    #T_obs, clusters, cluster_p_values, H0 = \
+                    collection_dict[aging][task][chs][band] = \
+                        calculate_permutation_cluster_1samp_test(epochs_power)
+    # print("1samp_test")
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+    return collection_dict
+
+
+def collect_permutation_cluster_test():
+    """Organizing aging: task: channels """
+    iter_freqs = [
+        ('Theta', 4, 7),
+        ('Alpha', 8, 12),
+        ('Beta', 13, 25),
+        ('Gamma', 30, 45)]
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    chs_name = ['lr', 'ap']
+    gfp_dict = {band: [] for band in iter_freqs}
+    chs_dict = {chs: copy.deepcopy(gfp_dict) for chs in chs_name}
+    task_dict = {task: copy.deepcopy(chs_dict) for task in task_selected}
+    collection_dict = {aging: copy.deepcopy(task_dict) for aging in aging_variable}
+    gfp_pair_aging_dict, gfp_aging_task_chs_dict =\
+        build_individual_aging_frequency_gfp_dict()
+    for aging in collection_dict.keys():
+        if aging == 'elder':
+            continue
+        logger.info(f"loop: {aging}")
+        for task in task_dict.keys():
+            logger.info(f"loop: {task}")
+            for chs in chs_dict.keys():
+                logger.info(f"loop: {chs}")
+                for band in gfp_dict.keys():
+                    logger.info(f"loop: {band}")
+                    cons = []
+                    for key in gfp_aging_task_chs_dict[aging][task][band][chs].keys():
+                        logger.info(f"loop: {key}")
+                        cons.append(gfp_aging_task_chs_dict[aging][task][band][chs][key])
+                    #T_obs, clusters, cluster_p_values, H0 = \
+                    collection_dict[aging][task][chs][band] = \
+                        calculate_permutation_cluster_test(cons)
+    # print("permut_test")
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+    return collection_dict
+
+
+def collect_ttest_1samp():
+    """Organizing aging: task: channels """
+    from scipy import stats
+    iter_freqs = [
+        ('Theta', 4, 7),
+        ('Alpha', 8, 12),
+        ('Beta', 13, 25),
+        ('Gamma', 30, 45)]
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    chs_name = ['lr', 'ap']
+    gfp_dict = {band: copy.deepcopy([]) for band in iter_freqs}
+    chs_dict = {chs: copy.deepcopy(gfp_dict) for chs in chs_name}
+    task_dict = {task: copy.deepcopy(chs_dict) for task in task_selected}
+    collection_dict = {aging: copy.deepcopy(task_dict) for aging in aging_variable}
+    gfp_pair_aging_dict, gfp_aging_task_chs_dict =\
+        build_individual_aging_frequency_gfp_dict()
+    for aging in collection_dict.keys():
+        if aging == 'elder':
+            continue
+        logger.info(f"loop: {aging}")
+        for task in task_dict.keys():
+            logger.info(f"loop: {task}")
+            for chs in chs_dict.keys():
+                logger.info(f"loop: {chs}")
+                for band in gfp_dict.keys():
+                    logger.info(f"loop: {band}")
+                    epochs_power = \
+                        gfp_pair_aging_dict[aging][task][0][band][chs]
+                    # Ttest_1sampResult(statistic, pvalue)
+                    collection_dict[aging][task][chs][band] = \
+                        stats.ttest_1samp(epochs_power, 0, axis=0)
+    # pvalue = collection_dict[aging]['temporal']['lr'][('Theta', 4, 7)].pvalue
+    # pvalue[pvalue < .05]
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+    return collection_dict
+
+
+def plot_time_frequency():
+    pass
 
 
 def devp_plot_grand_gfp():
@@ -1107,8 +1418,6 @@ def devp_plot_grand_gfp():
     for task in task_selected:
         _file = f"grand_{task}_frequency_map.pkl"
         frequency_map = load_list_pkl(_file)
-        __import__('IPython').embed()
-        __import__('sys').exit()
         fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
         colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
         for ((freq_name, fmin, fmax), average), color, ax in zip(
@@ -1202,18 +1511,417 @@ def plot_grand_gfp(task, file_r, aging_label=None):
         fig.savefig(w_png, dpi=300)
 
 
+def plot_grand_sig_clusterp_gfp(task, file_r, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    collection_dict = collect_permutation_cluster_1samp_test()
+    for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+        chs_name = ['lr', 'ap']
+        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+        colors = colors[[0,2],:] # take 0:green, 2:blue
+        for i_chs, chs in enumerate(chs_pairs):
+            frequency_map = load_list_pkl(file_r)
+            for i in range(len(frequency_map)):
+                frequency_map[i][1].pick_channels(chs)
+                print(f"{frequency_map[i][1]}")
+            for ((freq_name, fmin, fmax), average), ax in zip(
+                    frequency_map, axes.ravel()[::-1]):
+                # __import__('IPython').embed()
+                # __import__('sys').exit()
+                times = average.times * 1e3
+                gfp = np.sum(average.data ** 2, axis=0)
+                gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                              stat_fun=stat_fun)
+                ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                if i_chs == 1:
+                    T_obs, clusters, cluster_p_values, H0 = \
+                        collection_dict[aging_label][task][chs_name[i_chs_pair]][(freq_name, fmin, fmax)]
+                    # Create new stats image with only significant clusters
+                    T_obs_plot = np.nan * np.ones_like(T_obs)
+                    upper_plot = np.nan * np.ones_like(T_obs)
+                    lower_plot = np.nan * np.ones_like(T_obs)
+                    for c, p_val in zip(clusters, cluster_p_values):
+                        if p_val <= 0.05:
+                            #T_obs_plot[c] = T_obs[c]
+                            upper_plot[c] = ax.get_ylim()[1]*1.1
+                            lower_plot[c] = ax.get_ylim()[0]*1.1
+                            print("t_obs")
+                            # __import__('IPython').embed()
+                            # __import__('sys').exit()
+                    ax.fill_between(times, upper_plot, lower_plot, color=colors[1], alpha=0.3)
+                ax.grid(True)
+                ax.set_ylabel('GFP')
+                ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
+                            xy=(0.95, 0.8),
+                            horizontalalignment='right',
+                            xycoords='axes fraction')
+                ax.set_xlim(-100, 2000)
+            axes.ravel()[-1].set_xlabel('Time [ms]')
+        if aging_label:
+            w_png = figures_d.joinpath(f"{aging_label}_grand_sig_clusterp_gfp_"
+                                       f"{task}_{chs_name[i_chs_pair]}_dpi.png")
+        else:
+            w_png = figures_d.joinpath(f"grand_sig_clusterp_gfp_{task}"
+                                       f"_{chs_name[i_chs_pair]}_dpi.png")
+        logger.info("saving file:")
+        logger.info(f"{w_png.as_posix()}")
+        # collection_dict['young']['spatial']['lr'][('Theta', 4, 7)][0].shape
+        fig.savefig(w_png, dpi=300)
+        # __import__('IPython').embed()
+        # __import__('sys').exit()
+
+
+def plot_grand_sig_ttest1samp_gfp(task, file_r, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    collection_dict = collect_ttest_1samp()
+    for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+        chs_name = ['lr', 'ap']
+        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+        colors = colors[[0,2],:] # take 0:green, 2:blue
+        for i_chs, chs in enumerate(chs_pairs):
+            frequency_map = load_list_pkl(file_r)
+            for i in range(len(frequency_map)):
+                frequency_map[i][1].pick_channels(chs)
+                print(f"{frequency_map[i][1]}")
+            for ((freq_name, fmin, fmax), average), ax in zip(
+                    frequency_map, axes.ravel()[::-1]):
+                # __import__('IPython').embed()
+                # __import__('sys').exit()
+                times = average.times * 1e3
+                gfp = np.sum(average.data ** 2, axis=0)
+                gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                            stat_fun=stat_fun)
+                ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                if i_chs == 1:
+                    pvalue = \
+                        collection_dict[aging_label][task][chs_name[i_chs_pair]][(freq_name, fmin, fmax)].pvalue
+                    # Create new stats image with only significant clusters
+                    #T_obs_plot = np.nan * np.ones_like(T_obs)
+                    upper_plot = np.nan * np.ones_like(pvalue)
+                    lower_plot = np.nan * np.ones_like(pvalue)
+                    marker = np.where(pvalue < .05)
+                    #T_obs_plot[c] = T_obs[c]
+                    upper_plot[marker] = ax.get_ylim()[1]*1.1
+                    lower_plot[marker] = ax.get_ylim()[0]*1.1
+                    print("t_obs")
+                    # __import__('IPython').embed()
+                    # __import__('sys').exit()
+                    ax.fill_between(times, upper_plot, lower_plot, color=colors[1], alpha=0.3)
+                ax.grid(True)
+                ax.set_ylabel('GFP')
+                ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
+                            xy=(0.95, 0.8),
+                            horizontalalignment='right',
+                            xycoords='axes fraction')
+                ax.set_xlim(-100, 2000)
+            axes.ravel()[-1].set_xlabel('Time [ms]')
+        if aging_label:
+            w_png = figures_d.joinpath(f"{aging_label}_grand_sig_ttest1samp_gfp_{task}_{chs_name[i_chs_pair]}_dpi.png")
+        else:
+            w_png = figures_d.joinpath(f"grand_sig_gfp_{task}_{chs_name[i_chs_pair]}_dpi.png")
+        logger.info("saving file:")
+        logger.info(f"{w_png.as_posix()}")
+        # collection_dict['young']['spatial']['lr'][('Theta', 4, 7)][0].shape
+        fig.savefig(w_png, dpi=300)
+        # __import__('IPython').embed()
+        # __import__('sys').exit()
+
+
+def plot_grand_theta_sig_ttest1samp_gfp(task_selected, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    collection_dict = collect_ttest_1samp()
+    chs_name = ['lr', 'ap']
+    chs_title_dict = {'lr': 'LH-RH', 'ap': 'ANT-POS'}
+    fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+    count_axis = -1
+    for task in task_selected:
+        # if task == 'spatial':
+            # continue
+        file_r = f"{aging_label}_grand_{task}_frequency_map.pkl"
+        for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+            colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+            colors = colors[[0,2],:] # take 0:green, 2:blue
+            count_axis += 1
+            for i_chs, chs in enumerate(chs_pairs):
+                frequency_map = load_list_pkl(file_r)
+                for i in range(len(frequency_map)):
+                    frequency_map[i][1].pick_channels(chs)
+                    print(f"{frequency_map[i][1]}")
+                for (freq_name, fmin, fmax), average in frequency_map:
+                    # __import__('IPython').embed()
+                    # __import__('sys').exit()
+                    if freq_name != 'Theta':
+                        print("skip")
+                        continue
+                    ax = axes.ravel()[::-1][count_axis]
+                    times = average.times * 1e3
+                    gfp = np.sum(average.data ** 2, axis=0)
+                    gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                    ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                    ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                    ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                                stat_fun=stat_fun)
+                    ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                    ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                    ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                    if i_chs == 1:
+                        pvalue = \
+                            collection_dict[aging_label][task][chs_name[i_chs_pair]][(freq_name, fmin, fmax)].pvalue
+                        # Create new stats image with only significant clusters
+                        #T_obs_plot = np.nan * np.ones_like(T_obs)
+                        upper_plot = np.nan * np.ones_like(pvalue)
+                        lower_plot = np.nan * np.ones_like(pvalue)
+                        marker = np.where(pvalue < .05)
+                        #T_obs_plot[c] = T_obs[c]
+                        upper_plot[marker] = ax.get_ylim()[1]*0.5
+                        lower_plot[marker] = ax.get_ylim()[0]*0.5
+                        pre_stimulus = np.where(times < 0)
+                        upper_plot[pre_stimulus] = np.nan
+                        lower_plot[pre_stimulus] = np.nan
+                        # print("t_obs")
+                        # __import__('IPython').embed()
+                        # __import__('sys').exit()
+                        ax.fill_between(times, upper_plot, lower_plot, color='red', alpha=0.2)
+                        ax.grid(True)
+                        ax.set_ylabel('GFP')
+                        ax.annotate('%s: %s' % (task, chs_title_dict[chs_name[i_chs_pair]]),
+                                    xy=(0.95, 0.8),
+                                    horizontalalignment='right',
+                                    xycoords='axes fraction')
+                    ax.set_xlim(-100, 2000)
+                axes.ravel()[-1].set_xlabel('Time [ms]')
+    if aging_label:
+        w_png = figures_d.joinpath(f"{aging_label}_grand_theta_sig_ttest1samp"
+                                   f"_gfp_dpi.png")
+    else:
+        w_png = figures_d.joinpath(f"grand_theta_sig_ttest1samp_gfp_"
+                                   f"_dpi.png")
+    logger.info("saving file:")
+    logger.info(f"{w_png.as_posix()}")
+    # collection_dict['young']['spatial']['lr'][('Theta', 4, 7)][0].shape
+    fig.savefig(w_png, dpi=300)
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+
+
+def plot_grand_theta_sig_cluster1samp_gfp(task_selected, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    collection_dict = collect_permutation_cluster_1samp_test()
+    chs_name = ['lr', 'ap']
+    chs_title_dict = {'lr': 'LH-RH', 'ap': 'ANT-POS'}
+    fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+    count_axis = -1
+    for task in task_selected:
+        # if task == 'spatial':
+            # continue
+        file_r = f"{aging_label}_grand_{task}_frequency_map.pkl"
+        for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+            colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+            colors = colors[[0,2],:] # take 0:green, 2:blue
+            count_axis += 1
+            for i_chs, chs in enumerate(chs_pairs):
+                frequency_map = load_list_pkl(file_r)
+                for i in range(len(frequency_map)):
+                    frequency_map[i][1].pick_channels(chs)
+                    print(f"{frequency_map[i][1]}")
+                for (freq_name, fmin, fmax), average in frequency_map:
+                    # __import__('IPython').embed()
+                    # __import__('sys').exit()
+                    if freq_name != 'Theta':
+                        print("skip")
+                        continue
+                    ax = axes.ravel()[::-1][count_axis]
+                    times = average.times * 1e3
+                    gfp = np.sum(average.data ** 2, axis=0)
+                    gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                    ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                    ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                    ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                                stat_fun=stat_fun)
+                    ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                    ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                    ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                    if i_chs == 1:
+                        T_obs, clusters, cluster_p_values, H0 = \
+                            collection_dict[aging_label][task][chs_name[i_chs_pair]][(freq_name, fmin, fmax)]
+                        # Create new stats image with only significant clusters
+                        T_obs_plot = np.nan * np.ones_like(T_obs)
+                        upper_plot = np.nan * np.ones_like(T_obs)
+                        lower_plot = np.nan * np.ones_like(T_obs)
+                        pre_stimulus = np.where(times < 0)
+                        for c, p_val in zip(clusters, cluster_p_values):
+                            if p_val <= 0.05:
+                                #T_obs_plot[c] = T_obs[c]
+                                upper_plot[c] = ax.get_ylim()[1]*0.5
+                                lower_plot[c] = ax.get_ylim()[0]*0.5
+                        upper_plot[pre_stimulus] = np.nan
+                        lower_plot[pre_stimulus] = np.nan
+                        ax.fill_between(times, upper_plot, lower_plot, color='red', alpha=0.2)
+                        ax.grid(True)
+                        ax.set_ylabel('GFP')
+                        ax.annotate('%s: %s' % (task, chs_title_dict[chs_name[i_chs_pair]]),
+                                    xy=(0.95, 0.8),
+                                    horizontalalignment='right',
+                                    xycoords='axes fraction')
+                    ax.set_xlim(-100, 2000)
+                axes.ravel()[-1].set_xlabel('Time [ms]')
+    if aging_label:
+        w_png = figures_d.joinpath(f"{aging_label}_grand_theta_sig_cluster1samp"
+                                   f"_gfp_dpi.png")
+    else:
+        w_png = figures_d.joinpath(f"grand_theta_sig_cluster1samp_gfp_"
+                                   f"dpi.png")
+    logger.info("saving file:")
+    logger.info(f"{w_png.as_posix()}")
+    # collection_dict['young']['spatial']['lr'][('Theta', 4, 7)][0].shape
+    fig.savefig(w_png, dpi=300)
+    # __import__('IPython').embed()
+    # __import__('sys').exit()
+
+
+def plot_grand_sig_clusterbp_gfp(task, file_r, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    chs_lr_pair, chs_ap_pair = ch_di_list()
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    collection_dict = collect_permutation_cluster_test()
+    for i_chs_pair, chs_pairs in enumerate(zip(chs_lr_pair, chs_ap_pair)):
+        chs_name = ['lr', 'ap']
+        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+        colors = colors[[0,2],:] # take 0:green, 2:blue
+        for i_chs, chs in enumerate(chs_pairs):
+            frequency_map = load_list_pkl(file_r)
+            for i in range(len(frequency_map)):
+                frequency_map[i][1].pick_channels(chs)
+                print(f"{frequency_map[i][1]}")
+            for ((freq_name, fmin, fmax), average), ax in zip(
+                    frequency_map, axes.ravel()[::-1]):
+                # __import__('IPython').embed()
+                # __import__('sys').exit()
+                times = average.times * 1e3
+                gfp = np.sum(average.data ** 2, axis=0)
+                gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+                ax.plot(times, gfp, label=freq_name, color=colors[i_chs], linewidth=2.5)
+                ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+                # ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                            # stat_fun=stat_fun)
+                # ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+                # ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+                # ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_chs], alpha=0.3)
+                if i_chs == 1:
+                    T_obs, clusters, cluster_p_values, H0 = \
+                        collection_dict[aging_label][task][chs_name[i_chs_pair]][(freq_name, fmin, fmax)]
+                    # Create new stats image with only significant clusters
+                    T_obs_plot = np.nan * np.ones_like(T_obs)
+                    upper_plot = np.nan * np.ones_like(T_obs)
+                    lower_plot = np.nan * np.ones_like(T_obs)
+                    for c, p_val in zip(clusters, cluster_p_values):
+                        if p_val <= 0.05:
+                            #T_obs_plot[c] = T_obs[c]
+                            upper_plot[c] = ax.get_ylim()[1]*1.1
+                            lower_plot[c] = ax.get_ylim()[0]*1.1
+                            print("t_obs")
+                            # __import__('IPython').embed()
+                            # __import__('sys').exit()
+                    ax.fill_between(times, upper_plot, lower_plot, color=colors[1], alpha=0.3)
+                ax.grid(True)
+                ax.set_ylabel('GFP')
+                ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
+                            xy=(0.95, 0.8),
+                            horizontalalignment='right',
+                            xycoords='axes fraction')
+                ax.set_xlim(-100, 2000)
+            axes.ravel()[-1].set_xlabel('Time [ms]')
+        if aging_label:
+            w_png = figures_d.joinpath(f"{aging_label}_grand_sig_clusterbp_gfp_"
+                                       f"{task}_{chs_name[i_chs_pair]}_dpi.png")
+        else:
+            w_png = figures_d.joinpath(f"grand_sig_clusterbp_gfp_{task}"
+                                       f"_{chs_name[i_chs_pair]}_dpi.png")
+        logger.info("saving file:")
+        logger.info(f"{w_png.as_posix()}")
+        # collection_dict['young']['spatial']['lr'][('Theta', 4, 7)][0].shape
+        fig.savefig(w_png, dpi=300)
+        # __import__('IPython').embed()
+        # __import__('sys').exit()
+
+
 def plot_di_aging_grand_gfp():
     # Plot
     task_selected = ['spatial', 'temporal']
     aging_variable = ['young', 'elder']
     for i in aging_variable:
-        if i == 'young':
+        if i == 'elder':
             continue
         for task in task_selected:
             # if task == 'spatial':
                 # continue
             file_r = f"{i}_grand_{task}_frequency_map.pkl"
-            plot_grand_gfp(task, file_r, aging_label=i)
+            # plot_grand_gfp(task, file_r, aging_label=i)
+            plot_grand_sig_clusterp_gfp(task, file_r, aging_label=i)
+            # plot_grand_sig_ttest1samp_gfp(task, file_r, aging_label=i)
+            # plot_grand_sig_clusterbp_gfp(task, file_r, aging_label=i)
+            # plot_grand_theta_sig_ttest1samp_gfp(task, file_r, aging_label=i)
+
+
+def plot_theta_aging_grand_gfp():
+    # Plot
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    for i in aging_variable:
+        if i == 'elder':
+            continue
+        #plot_grand_theta_sig_ttest1samp_gfp(task_selected, aging_label=i)
+        plot_grand_theta_sig_cluster1samp_gfp(task_selected, aging_label=i)
 
 
 def dd_plot_gfp():
@@ -1295,7 +2003,7 @@ def sample_channels_type():
     # plt.savefig("viz_eeg_only.png")
 
 
-if __name__ == '__main__':
+def old():
     #devp_ssp_em()
     #preprocess_pipeline()
     #devp_read_raw_bids()
@@ -1320,8 +2028,19 @@ if __name__ == '__main__':
     #devp_concatenate_raw()
     #devp_plot_grand_gfp()
     # concatenate_raw_sub228()
+    return None
+
+
+if __name__ == '__main__':
     # concatenate_raw_sub126()
     # main_build_individual_frequency_map_pkl()
     # build_grand_frequency_maps_pkl()
     # build_aging_grand_frequency_maps_pkl()
-    # plot_di_aging_grand_gfp()
+    plot_di_aging_grand_gfp()
+    # plot_theta_aging_grand_gfp()
+    # build_individual_aging_frequency_gfp()
+    # build_aging_grand_frequency_maps_pkl()
+    # collect_permutation_cluster_1samp_test()
+    # collect_ttest_1samp()
+    # build_individual_aging_frequency_gfp_dict()
+    # save_individual_aging_frequency_gfp_dict(sub_index=None, task_selected=None)
