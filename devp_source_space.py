@@ -870,7 +870,8 @@ class SourceSpaceStat2(SourceSpaceStat):
 
     def stack_stc_event_contrast(self, subjects, target_event):
         from devp_basicio import save_list_pkl
-        for subject in subjects[19:]:
+        # TODO: revert sequence
+        for subject in subjects[:19]:
             self.logger.info(f'Processing {subject} ...')
             contrast = self.get_event_contrast(subject, target_event)
             save_list_pkl(contrast, f'{subject}_event_contrast_{target_event}.pkl', logger=self.logger)
@@ -901,7 +902,7 @@ class SourceSpaceStat2(SourceSpaceStat):
         from devp_basicio import save_list_pkl
         from scipy import stats as stats
         from mne.stats import spatio_temporal_cluster_1samp_test
-        X, n_subjects = self.load_stc_event_contrast(subjects)
+        X, n_subjects = self.load_stc_event_contrast(subjects, target_event)
         X = np.transpose(X, [0, 2, 1])
         self.logger.info('Computing connectivity.')
         src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
@@ -1348,7 +1349,7 @@ def main_source_space_exp_2():
             sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
             sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
     sss.stack_stc_event_contrast(subjects, 'sti2')
-    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2'):
+    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
 
 
 def main_source_space():
@@ -1384,8 +1385,8 @@ def main_source_space():
     # sss.sti2_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_hat_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_permutation_cluster_1samp_test(subjects)
-    # sss.stack_stc_event_contrast(subjects, 'sti2')
-    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2'):
+    sss.stack_stc_event_contrast(subjects, 'sti2')
+    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
     # parallel, run_func, _ = parallel_func(ss.prepare_source_space, n_jobs=n_jobs)
     # parallel(run_func(subject) for subject in subjects)
 
