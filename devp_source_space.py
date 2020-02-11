@@ -1337,7 +1337,7 @@ def main_source_space_exp_1():
     sss.sti2_plot_spatio_temporal_cluster_1samp_test()
 
 
-def main_source_space_exp2():
+def main_source_space_exp_2():
     """Test baseline covariance"""
     sss = SourceSpaceStat2()
     from mne.parallel import parallel_func
