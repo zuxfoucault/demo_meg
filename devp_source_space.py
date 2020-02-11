@@ -862,7 +862,7 @@ class SourceSpaceStat2(SourceSpaceStat):
             stcs[-1].crop(0, None)
             # tmin = spat_stc.tmin
             # tstep = spat_stc.tstep # tstep = 0.001
-            n_vertices_sample, n_times = spat_stc.data.shape
+            n_vertices_sample, n_times = stcs[-1].data.shape
             self.logger.info(f'{task_selected} n_vertices_sample: {n_vertices_sample}')
             morph_mat, n_vertices_fsave = self.get_morphed_mat(subject, inv)
             data.append(np.abs(morph_mat.dot(stcs[-1].data)))
@@ -872,7 +872,7 @@ class SourceSpaceStat2(SourceSpaceStat):
         from devp_basicio import save_list_pkl
         for subject in subjects[19:]:
             self.logger.info(f'Processing {subject} ...')
-            contrast = self.get_event_contrast(subject)
+            contrast = self.get_event_contrast(subject, target_event)
             save_list_pkl(contrast, f'{subject}_event_contrast_{target_event}.pkl', logger=self.logger)
 
     def load_stc_event_contrast(self, subjects, target_event):
@@ -907,8 +907,7 @@ class SourceSpaceStat2(SourceSpaceStat):
         src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
         src = mne.read_source_spaces(src_fname)
         connectivity = mne.spatial_src_connectivity(src)
-        #p_threshold = 1.0e-2
-        p_threshold = 0.1
+        p_threshold = 1.0e-2
         t_threshold = -stats.distributions.t.ppf(
             p_threshold / 2., n_subjects - 1)
         self.logger.info('Clustering.')
@@ -1315,6 +1314,43 @@ def check_hsp(sub_index=None, task_selected=None):
     __import__('sys').exit()
 
 
+def main_source_space_exp_1():
+    """Test empty as noise covariance"""
+    sss = SourceSpaceStat()
+    from mne.parallel import parallel_func
+    subjects = get_subjects_list()
+    for subject in subjects:
+        logger.info(f'Processing {subject} ...')
+        ss.prepare_source_space(subject)
+        ss.prepare_bem_solution(subject)
+        ss.convert_con2fif(subject)
+        ss.prepare_trans_matrix(subject)
+        ss.create_high_dense_head_surf(subject)
+        ss.check_coregistration(subject)
+        ss.prepare_forward_solution(subject)
+        ss.prepare_noise_cov(subject)
+        ss.prepare_inverse_operator(subject)
+        sss.get_contrast_sti2(subject)
+    sss.stack_stc_contrast(subjects)
+    sss.load_stc_contrast(subjects)
+    sss.sti2_spatio_temporal_cluster_1samp_test(subjects)
+    sss.sti2_plot_spatio_temporal_cluster_1samp_test()
+
+
+def main_source_space_exp2():
+    """Test baseline covariance"""
+    sss = SourceSpaceStat2()
+    from mne.parallel import parallel_func
+    subjects = get_subjects_list()
+    for subject in subjects:
+        logger.info(f'Processing {subject} ...')
+        for task_selected in sss.task_list:
+            sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
+            sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
+    sss.stack_stc_event_contrast(subjects, 'sti2')
+    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2'):
+
+
 def main_source_space():
     #ss = SourceSpace()
     # sss = SourceSpaceStat()
@@ -1326,7 +1362,7 @@ def main_source_space():
     # __import__('IPython').embed()
     # __import__('sys').exit()
     # for subject in subjects[24:]:
-    for subject in subjects:
+    # for subject in subjects:
         # logger.info(f'Processing {subject} ...')
         # ss.prepare_source_space(subject)
         # ss.prepare_bem_solution(subject)
@@ -1338,9 +1374,9 @@ def main_source_space():
         # ss.prepare_noise_cov(subject)
         # ss.prepare_inverse_operator(subject)
         # sss.get_contrast_sti2(subject)
-        for task_selected in sss.task_list:
-            sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
-            sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
+        # for task_selected in sss.task_list:
+            # sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
+            # sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
     # sss.stack_stc_contrast(subjects)
     # sss.load_stc_contrast(subjects)
     # sss.sti2_spatio_temporal_cluster_1samp_test(subjects)
@@ -1348,6 +1384,8 @@ def main_source_space():
     # sss.sti2_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_hat_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_permutation_cluster_1samp_test(subjects)
+    # sss.stack_stc_event_contrast(subjects, 'sti2')
+    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2'):
     # parallel, run_func, _ = parallel_func(ss.prepare_source_space, n_jobs=n_jobs)
     # parallel(run_func(subject) for subject in subjects)
 
