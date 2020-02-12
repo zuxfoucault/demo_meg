@@ -1,11 +1,11 @@
 import sys
-import logging
-import logging.config
 import yaml
 
 
 def logger(fileName, logName):
     """ read custom log config"""
+    import logging
+    import logging.config
 
     with open('logging.yml') as f:
         LOGGING = yaml.load(f, Loader=yaml.FullLoader)

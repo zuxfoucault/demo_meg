@@ -783,6 +783,24 @@ class SourceSpaceStat2(SourceSpaceStat):
         super().__init__()
         self.task_list = ['spatial', 'temporal']
 
+    def get_cov_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline-cov.fif')
+
+    def get_inv_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            subject,
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline-inv.fif')
+
+    def get_contrast_fname(self, **kwargs):
+        return f'{kwargs["subject"]}_event_contrast_{kwargs["target_event"]}.pkl'
+
+    def get_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
+        return f'event_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test.pkl'
+
     def get_event_epochs_encoder(self, subject, task_selected, target_event_id):
         """Get epochs time lock to encoder stimulus 2"""
         self.logger.info('Get epochs time lock to encoder stimulus 2...')
@@ -815,11 +833,13 @@ class SourceSpaceStat2(SourceSpaceStat):
         """Prepare noise covariance"""
         self.logger.info(f'Prepare {target_event} baseline noise covariance')
         epochs = self.get_epochs_encoder_sti2(subject, task_selected)
-        target_event_id = 254
-        #epochs = self.get_event_epochs_encoder(subject, task_selected, target_event_id)
+        # target_event_id = 254
+        # epochs = self.get_event_epochs_encoder(subject, task_selected, target_event_id)
         noise_cov_baseline = mne.compute_covariance(epochs, tmax=0, method='auto')
-        cov_fname = self.mne_derivatives_dname.joinpath(
-            subject, f'{subject}_{task_selected}_{target_event}_baseline-cov.fif')
+        cov_fname = self.get_cov_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
         self.logger.info(f'Writing cov_fname: {cov_fname}')
         mne.write_cov(cov_fname, noise_cov_baseline)
 
@@ -827,8 +847,10 @@ class SourceSpaceStat2(SourceSpaceStat):
         """Prepare inverse operator"""
         self.logger.info('Prepare inverse operator')
         raw, events, event_id, raw_em = _read_raw_bids(subject, task_selected)
-        cov_fname = self.mne_derivatives_dname.joinpath(
-            subject, f'{subject}_{task_selected}_{target_event}_baseline-cov.fif')
+        cov_fname = self.get_cov_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
         self.logger.info(f'Loading cov_fname: {cov_fname}')
         cov = mne.read_cov(cov_fname)
         fwd_fname = self.mne_derivatives_dname.joinpath(
@@ -836,9 +858,10 @@ class SourceSpaceStat2(SourceSpaceStat):
         self.logger.info(f'Loading fwd_fname: {fwd_fname}')
         fwd = mne.read_forward_solution(fwd_fname)
         inv = mne.minimum_norm.make_inverse_operator(raw.info, fwd, cov, loose=0.2)
-        inv_fname = self.mne_derivatives_dname.joinpath(
-            subject, f'{subject}_{task_selected}_{target_event}_baseline-inv.fif')
-        self.inv_fname = inv_fname
+        inv_fname = self.get_inv_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
         self.logger.info(f'Writing inv_fname: {inv_fname}')
         mne.minimum_norm.write_inverse_operator(inv_fname, inv)
 
@@ -853,8 +876,10 @@ class SourceSpaceStat2(SourceSpaceStat):
         stcs = list()
         data = list()
         for i, task_selected in enumerate(self.task_list):
-            inv_fname = self.mne_derivatives_dname.joinpath(
-                subject, f'{subject}_{task_selected}_{target_event}_baseline-inv.fif')
+            inv_fname = self.get_inv_fname(
+                subject=subject,
+                task_selected=task_selected,
+                target_event=target_event)
             self.logger.info(f'Loading inv_fname: {inv_fname}')
             inv = mne.minimum_norm.read_inverse_operator(inv_fname)
             stcs.append(mne.minimum_norm.apply_inverse(evokeds[i], inv, lambda2, method))
@@ -870,11 +895,13 @@ class SourceSpaceStat2(SourceSpaceStat):
 
     def stack_stc_event_contrast(self, subjects, target_event):
         from devp_basicio import save_list_pkl
-        # TODO: revert sequence
-        for subject in subjects[:19]:
+        for subject in subjects:
             self.logger.info(f'Processing {subject} ...')
             contrast = self.get_event_contrast(subject, target_event)
-            save_list_pkl(contrast, f'{subject}_event_contrast_{target_event}.pkl', logger=self.logger)
+            contrast_fname = self.get_contrast_fname(
+                subject=subject,
+                target_event=target_event)
+            save_list_pkl(contrast, contrast_fname, logger=self.logger)
 
     def load_stc_event_contrast(self, subjects, target_event):
         from devp_basicio import load_list_pkl, define_id_by_aging_dict
@@ -886,7 +913,10 @@ class SourceSpaceStat2(SourceSpaceStat):
             if int(subject[-3:]) not in aging_dict['young']:
                 continue
             self.logger.info(f'Processing {subject} ...')
-            contrast = load_list_pkl(f'{subject}_event_contrast_{target_event}.pkl', logger=self.logger)
+            contrast_fname = self.get_contrast_fname(
+                subject=subject,
+                target_event=target_event)
+            contrast = load_list_pkl(contrast_fname, logger=self.logger)
             contrast_list.append(contrast)
             stack = np.stack(contrast_list, axis=0)
             _c += 1
@@ -917,7 +947,10 @@ class SourceSpaceStat2(SourceSpaceStat):
                 X, connectivity=connectivity, n_jobs=1,
                 threshold=t_threshold, buffer_size=None,
                 verbose=True)
-        save_list_pkl(clu, f'event_{target_event}_spatio_temporal_cluster_1samp_test.pkl', logger=self.logger)
+        event_spatio_temporal_cluster_1samp_test_fname = \
+            self.get_spatio_temporal_cluster_1samp_test_fname(
+                target_event=target_event)
+        save_list_pkl(clu, event_spatio_temporal_cluster_1samp_test_fname, logger=self.logger)
         # Now select the clusters that are sig. at p < 0.05 (note that this value
         # is multiple-comparisons corrected).
         good_cluster_inds = np.where(cluster_p_values < 0.05)[0]
@@ -927,7 +960,10 @@ class SourceSpaceStat2(SourceSpaceStat):
         mlab.options.offscreen = True
         from devp_basicio import load_list_pkl
         from mne.stats import summarize_clusters_stc
-        clu = load_list_pkl(f'event_{target_event}_spatio_temporal_cluster_1samp_test.pkl', logger=self.logger)
+        event_spatio_temporal_cluster_1samp_test_fname = \
+            self.get_spatio_temporal_cluster_1samp_test_fname(
+                target_event=target_event)
+        clu = load_list_pkl(event_spatio_temporal_cluster_1samp_test_fname, logger=self.logger)
         self.logger.info('Visualizing clusters.')
         # Now let's build a convenient representation of each cluster, where each
         # cluster becomes a "time point" in the SourceEstimate
@@ -1029,6 +1065,52 @@ class SourceSpaceStat2(SourceSpaceStat):
         save_list_pkl(clu, 'sti2_permutation_cluster_1samp_test.pkl', logger=self.logger)
         __import__('IPython').embed()
         __import__('sys').exit()
+
+
+class SourceSpaceStat3(SourceSpaceStat2):
+    """Adaptively set event id 1 as variable and experiment on use baseline
+    as noise covariance matrix
+    """
+    def __init__(self):
+        super().__init__()
+
+    def get_cov_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline_s1-cov.fif')
+
+    def get_inv_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline_s1-inv.fif')
+
+    def get_contrast_fname(self, **kwargs):
+        return f'{kwargs["subject"]}_event_contrast_{kwargs["target_event"]}_s1.pkl'
+
+    def get_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
+        return f'event_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test_s1.pkl'
+
+    def prepare_event_baseline_noise_cov(self, subject, task_selected, target_event):
+        """Prepare noise covariance"""
+        self.logger.info(f'Prepare {target_event} baseline noise covariance')
+        target_event_id = 254
+        epochs = self.get_event_epochs_baseline(subject, task_selected, target_event_id)
+        noise_cov_baseline = mne.compute_covariance(epochs, tmax=0, method='auto')
+        cov_fname = self.get_cov_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
+        self.logger.info(f'Writing cov_fname: {cov_fname}')
+        mne.write_cov(cov_fname, noise_cov_baseline)
+
+
+class SourceSpaceStat4(SourceSpaceStat2):
+    """5D time-frequency beamforming based on LCMV
+    """
+    def __init__(self):
+        super().__init__()
 
 
 def devp_source_space():
@@ -1352,6 +1434,20 @@ def main_source_space_exp_2():
     sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
 
 
+def main_source_space_exp_3():
+    """Test baseline covariance sti1"""
+    sss = SourceSpaceStat3()
+    from mne.parallel import parallel_func
+    subjects = get_subjects_list()
+    for subject in subjects:
+        logger.info(f'Processing {subject} ...')
+        for task_selected in sss.task_list:
+            sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
+            sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
+    sss.stack_stc_event_contrast(subjects, 'sti2')
+    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
+
+
 def main_source_space():
     #ss = SourceSpace()
     # sss = SourceSpaceStat()
@@ -1393,7 +1489,8 @@ def main_source_space():
 
 def main():
     # devp_source_space()
-    main_source_space()
+    # main_source_space()
+    main_source_space_exp_3()
 
 
 if __name__ == '__main__':
