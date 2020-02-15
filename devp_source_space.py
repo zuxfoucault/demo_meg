@@ -7,7 +7,6 @@ import mne
 import numpy as np
 # import matplotlib.pyplot as plt
 # import mne_bids
-from mne_bids import read_raw_bids, make_bids_basename
 #from devp_basicio import _read_raw_bids
 import subprocess
 from devp_basicio import epochs_filter_by_trial
@@ -29,7 +28,7 @@ except NameError:
 class Logger(object):
     def __init__(self):
         self.info = print
-#logger = Logger()
+
 
 def devp_set_config():
     print(mne.get_config('MNE_USE_CUDA'))
@@ -98,6 +97,7 @@ def get_subjects_list(logger=None):
 
 
 def _read_raw_bids(subject=None, task_selected=None):
+    from mne_bids import read_raw_bids, make_bids_basename
     from devp_basicio import (read_id_task_dict, define_id_list,
                               concatenate_raw_sub126, concatenate_raw_sub228)
     if subject == None:
@@ -565,8 +565,6 @@ class SourceSpaceStat(SourceSpace):
     def get_contrast_epochs_sti2(self, subject=None):
         """Get contrast"""
         from mne.epochs import equalize_epoch_counts
-        if subject == None:
-            subject = 'sub-104'
         spat_epochs = self.get_epochs_encoder_sti2(
             subject, task_selected='spatial')
         temp_epochs = self.get_epochs_encoder_sti2(
@@ -583,6 +581,7 @@ class SourceSpaceStat(SourceSpace):
         self.logger.info(f'Loading src_fname: {src_fname}')
         src = mne.read_source_spaces(src_fname)
         fsave_vertices = [s['vertno'] for s in src]
+        self.logger.info(f'fsave_vertices: {fsave_vertices}')
         morph_mat = mne.compute_source_morph(
             src=inv['src'], subject_to='fsaverage',
             spacing=fsave_vertices, subjects_dir=self.SUBJECTS_DIR).morph_mat
@@ -634,12 +633,13 @@ class SourceSpaceStat(SourceSpace):
             self.logger.info(f'Processing {subject} ...')
             contrast = load_list_pkl(f'{subject}_contrast_sti2.pkl', logger=self.logger)
             contrast_list.append(contrast)
-            stack = np.stack(contrast_list, axis=0)
             _c += 1
             # some safe threshold
             if _c == 20:
                 break
         self.logger.info(f'Get #participants: {_c}')
+        # XXX: check
+        stack = np.stack(contrast_list, axis=0)
         # __import__('IPython').embed()
         # __import__('sys').exit()
         return stack, _c
@@ -778,6 +778,9 @@ class SourceSpaceStat(SourceSpace):
 class SourceSpaceStat2(SourceSpaceStat):
     """Adaptively set event id as variable and experiment on use baseline
     as noise covariance matrix
+
+    Diff to SourceSpaceStat:
+        Change methond name from sti2 to event for generalization purpose
     """
     def __init__(self):
         super().__init__()
@@ -787,13 +790,13 @@ class SourceSpaceStat2(SourceSpaceStat):
         return self.mne_derivatives_dname.joinpath(
             kwargs['subject'],
             f'{kwargs["subject"]}_{kwargs["task_selected"]}'
-            f'_{kwargs["target_event"]}_baseline-cov.fif')
+            f'_{kwargs["target_event"]}_baseline-cov.fif').as_posix()
 
     def get_inv_fname(self, **kwargs):
         return self.mne_derivatives_dname.joinpath(
-            subject,
+            kwargs['subject'],
             f'{kwargs["subject"]}_{kwargs["task_selected"]}'
-            f'_{kwargs["target_event"]}_baseline-inv.fif')
+            f'_{kwargs["target_event"]}_baseline-inv.fif').as_posix()
 
     def get_contrast_fname(self, **kwargs):
         return f'{kwargs["subject"]}_event_contrast_{kwargs["target_event"]}.pkl'
@@ -918,12 +921,12 @@ class SourceSpaceStat2(SourceSpaceStat):
                 target_event=target_event)
             contrast = load_list_pkl(contrast_fname, logger=self.logger)
             contrast_list.append(contrast)
-            stack = np.stack(contrast_list, axis=0)
             _c += 1
             # some safe threshold
             if _c == 20:
                 break
         self.logger.info(f'Get #participants: {_c}')
+        stack = np.stack(contrast_list, axis=0)
         # __import__('IPython').embed()
         # __import__('sys').exit()
         return stack, _c
@@ -962,8 +965,131 @@ class SourceSpaceStat2(SourceSpaceStat):
         from mne.stats import summarize_clusters_stc
         event_spatio_temporal_cluster_1samp_test_fname = \
             self.get_spatio_temporal_cluster_1samp_test_fname(
-                target_event=target_event)
+                target_event='sti2')
         clu = load_list_pkl(event_spatio_temporal_cluster_1samp_test_fname, logger=self.logger)
+        self.logger.info('Visualizing clusters.')
+        # Now let's build a convenient representation of each cluster, where each
+        # cluster becomes a "time point" in the SourceEstimate
+        #epochs = self.get_epochs_encoder_sti2()
+        tstep = 0.001 # 1/epochs.info['sfreq']
+        src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
+        src = mne.read_source_spaces(src_fname)
+        fsave_vertices = [s['vertno'] for s in src]
+        # stc_all_cluster_vis = summarize_clusters_stc(clu, tstep=tstep, p_thresh=0.05,
+                                                     # vertices=fsave_vertices,
+                                                     # subject='fsaverage')
+
+        # Let's actually plot the first "time point" in the SourceEstimate, which
+        # shows all the clusters, weighted by duration
+        # blue blobs are for condition A < condition B, red for A > B
+        # brain = stc_all_cluster_vis.plot(
+            # hemi='both', views='lateral', subjects_dir=self.SUBJECTS_DIR,
+            # time_label='Duration significant (ms)', size=(800, 800),
+            # smoothing_steps=5, clim=dict(kind='value', pos_lims=[0, 1, 40]))
+        stc_all_cluster_vis = summarize_clusters_stc(clu, tstep=tstep, p_thresh=0.8, vertices=fsave_vertices, subject='fsaverage')
+        brain = stc_all_cluster_vis.plot(hemi='split', views='lat', subjects_dir=self.SUBJECTS_DIR, time_label='Duration significant (ms)', size=(800, 800), smoothing_steps=5)
+        figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+        w_png = figures_d.joinpath("clusters.png")
+        self.logger.info(f'saveing fig: {w_png.as_posix()}')
+        brain.save_image(w_png.as_posix())
+        __import__('IPython').embed()
+        __import__('sys').exit()
+
+    def delete_intermediate_fils(self, subject, task_selected, target_event):
+        """Target : cov_fname
+                    inv_fname
+                    contrast_fname
+                    cluster_fname
+        """
+        cov_fname = self.get_cov_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
+        Path(cov_fname).unlink(missing_ok=True)
+        inv_fname = self.get_inv_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
+        Path(inv_fname).unlink(missing_ok=True)
+        contrast_fname = self.get_contrast_fname(
+            subject=subject,
+            target_event=target_event)
+        Path(contrast_fname).unlink(missing_ok=True)
+        cluster_fname = self.get_spatio_temporal_cluster_1samp_test_fname(
+            target_event=target_event)
+        Path(cluster_fname).unlink(missing_ok=True)
+
+
+class SourceSpaceStat3(SourceSpaceStat2):
+    """Adaptively set event id 1 as variable and experiment on use baseline
+    as noise covariance matrix
+    Verdict: sti1 baseline as noise covariance matrix has better results than sti2
+    but still didn't get significant results
+    """
+    def __init__(self):
+        super().__init__()
+
+    def get_cov_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline_s1-cov.fif').as_posix()
+
+    def get_inv_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event"]}_baseline_s1-inv.fif').as_posix()
+
+    def get_contrast_fname(self, **kwargs):
+        return f'{kwargs["subject"]}_event_contrast_{kwargs["target_event"]}_s1.pkl'
+
+    def get_event_permutation_cluster_1samp_test_fname(self, **kwargs):
+        return f'event_{kwargs["target_event"]}_permutation_cluster_1samp_test.pkl'
+
+    def get_test_fname(self, **kwargs):
+        return self.get_event_permutation_cluster_1samp_test_fname(kwargs)
+
+    def get_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
+        return f'event_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test_s1.pkl'
+
+    def prepare_event_baseline_noise_cov(self, subject, task_selected, target_event):
+        """Prepare noise covariance"""
+        self.logger.info(f'Prepare {target_event} baseline noise covariance')
+        target_event_id = 254
+        epochs = self.get_event_epochs_baseline(subject, task_selected, target_event_id)
+        noise_cov_baseline = mne.compute_covariance(epochs, tmax=0, method='auto')
+        cov_fname = self.get_cov_fname(
+            subject=subject,
+            task_selected=task_selected,
+            target_event=target_event)
+        self.logger.info(f'Writing cov_fname: {cov_fname}')
+        mne.write_cov(cov_fname, noise_cov_baseline)
+
+    def event_permutation_cluster_1samp_test(self, subjects, target_event):
+        self.logger.info('Performing event_permutation_cluster_1samp_test')
+        from devp_basicio import save_list_pkl
+        from mne.stats import permutation_cluster_1samp_test, ttest_1samp_no_p
+        from functools import partial
+        X, n_subjects = self.load_stc_contrast(subjects)
+        X = np.transpose(X, [0, 2, 1])
+        self.logger.info('Clustering.')
+        n_permutations = 'all'
+        T_obs, clusters, cluster_p_values, H0 = clu = \
+            permutation_cluster_1samp_test(
+                X, n_jobs=1,
+                n_permutations=n_permutations)
+        test_fname = self.get_test_fname(target_event=target_event)
+        # save_list_pkl(clu, f'event_{target_event}_permutation_cluster_1samp_test.pkl', logger=self.logger)
+        save_list_pkl(clu, test_fname, logger=self.logger)
+
+    def event_plot_permutation_cluster_1samp_test(self, target_event):
+        from mayavi import mlab
+        mlab.options.offscreen = True
+        from devp_basicio import load_list_pkl
+        from mne.stats import summarize_clusters_stc
+        test_fname = self.get_test_fname(target_event=target_event)
+        clu = load_list_pkl(test_fname, logger=self.logger)
         self.logger.info('Visualizing clusters.')
         # Now let's build a convenient representation of each cluster, where each
         # cluster becomes a "time point" in the SourceEstimate
@@ -992,125 +1118,248 @@ class SourceSpaceStat2(SourceSpaceStat):
         __import__('IPython').embed()
         __import__('sys').exit()
 
-    def sti2_tfce_hat_permutation_cluster_1samp_test(self, subjects):
-        """not modified"""
-        from devp_basicio import save_list_pkl
-        from mne.stats import permutation_cluster_1samp_test, ttest_1samp_no_p
-        from functools import partial
-        X, n_subjects = self.load_stc_contrast(subjects)
-        X = np.transpose(X, [0, 2, 1])
-        self.logger.info('Computing connectivity.')
-        src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
-        src = mne.read_source_spaces(src_fname)
-        connectivity = mne.spatial_src_connectivity(src)
-        #p_threshold = 1.0e-2
-        # p_threshold = 0.1
-        # t_threshold = -stats.distributions.t.ppf(
-            # p_threshold / 2., n_subjects - 1)
-        self.logger.info('Clustering.')
-        sigma = 1e-3
-        n_permutations = 'all'
-        stat_fun_hat = partial(ttest_1samp_no_p, sigma=sigma)
-        threshold_tfce = dict(start=0, step=0.2)
-        t_tfce_hat, clusters, p_tfce_hat, H0 = clu = \
-            permutation_cluster_1samp_test(
-                X, n_jobs=1, threshold=threshold_tfce, connectivity=None,
-                n_permutations=n_permutations, stat_fun=stat_fun_hat, buffer_size=None)
-        save_list_pkl(clu, 'sti2_tfce_hat_permutation_cluster_1samp_test.pkl', logger=self.logger)
-        __import__('IPython').embed()
-        __import__('sys').exit()
-
-    def sti2_tfce_permutation_cluster_1samp_test(self, subjects):
-        """not modified"""
-        from devp_basicio import save_list_pkl
-        from mne.stats import permutation_cluster_1samp_test, ttest_1samp_no_p
-        from functools import partial
-        X, n_subjects = self.load_stc_contrast(subjects)
-        X = np.transpose(X, [0, 2, 1])
-        self.logger.info('Computing connectivity.')
-        src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
-        src = mne.read_source_spaces(src_fname)
-        connectivity = mne.spatial_src_connectivity(src)
-        #p_threshold = 1.0e-2
-        # p_threshold = 0.1
-        # t_threshold = -stats.distributions.t.ppf(
-            # p_threshold / 2., n_subjects - 1)
-        self.logger.info('Clustering.')
-        n_permutations = 'all'
-        # sigma = 1e-3
-        # stat_fun_hat = partial(ttest_1samp_no_p, sigma=sigma)
-        threshold_tfce = dict(start=0, step=0.2)
-        t_tfce_hat, clusters, p_tfce_hat, H0 = clu = \
-            permutation_cluster_1samp_test(
-                X, n_jobs=1, threshold=threshold_tfce, connectivity=None,
-                n_permutations=n_permutations,  buffer_size=None)
-        save_list_pkl(clu, 'sti2_tfce_permutation_cluster_1samp_test.pkl', logger=self.logger)
-        __import__('IPython').embed()
-        __import__('sys').exit()
-
-    def sti2_permutation_cluster_1samp_test(self, subjects):
-        """not modified"""
-        from devp_basicio import save_list_pkl
-        from mne.stats import permutation_cluster_1samp_test, ttest_1samp_no_p
-        from functools import partial
-        X, n_subjects = self.load_stc_contrast(subjects)
-        X = np.transpose(X, [0, 2, 1])
-        self.logger.info('Clustering.')
-        n_permutations = 'all'
-        threshold_tfce = dict(start=0, step=0.2)
-        t_tfce_hat, clusters, p_tfce_hat, H0 = clu = \
-            permutation_cluster_1samp_test(
-                X, n_jobs=1, threshold=threshold_tfce, connectivity=None,
-                n_permutations=n_permutations, buffer_size=None)
-        save_list_pkl(clu, 'sti2_permutation_cluster_1samp_test.pkl', logger=self.logger)
-        __import__('IPython').embed()
-        __import__('sys').exit()
-
-
-class SourceSpaceStat3(SourceSpaceStat2):
-    """Adaptively set event id 1 as variable and experiment on use baseline
-    as noise covariance matrix
-    """
-    def __init__(self):
-        super().__init__()
-
-    def get_cov_fname(self, **kwargs):
-        return self.mne_derivatives_dname.joinpath(
-            kwargs['subject'],
-            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
-            f'_{kwargs["target_event"]}_baseline_s1-cov.fif')
-
-    def get_inv_fname(self, **kwargs):
-        return self.mne_derivatives_dname.joinpath(
-            kwargs['subject'],
-            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
-            f'_{kwargs["target_event"]}_baseline_s1-inv.fif')
-
-    def get_contrast_fname(self, **kwargs):
-        return f'{kwargs["subject"]}_event_contrast_{kwargs["target_event"]}_s1.pkl'
-
-    def get_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
-        return f'event_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test_s1.pkl'
-
-    def prepare_event_baseline_noise_cov(self, subject, task_selected, target_event):
-        """Prepare noise covariance"""
-        self.logger.info(f'Prepare {target_event} baseline noise covariance')
-        target_event_id = 254
-        epochs = self.get_event_epochs_baseline(subject, task_selected, target_event_id)
-        noise_cov_baseline = mne.compute_covariance(epochs, tmax=0, method='auto')
-        cov_fname = self.get_cov_fname(
-            subject=subject,
-            task_selected=task_selected,
-            target_event=target_event)
-        self.logger.info(f'Writing cov_fname: {cov_fname}')
-        mne.write_cov(cov_fname, noise_cov_baseline)
-
 
 class SourceSpaceStat4(SourceSpaceStat2):
     """5D time-frequency beamforming based on LCMV
     """
     def __init__(self):
         super().__init__()
+
+    def get_fwd_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'], f'{kwargs["subject"]}-fwd.fif').as_posix()
+
+    def get_lcmv_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event_id"]}_covariance-er_lcmv.pkl').as_posix()
+
+    def get_lcmv_f4_f45_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}_{kwargs["task_selected"]}'
+            f'_{kwargs["target_event_id"]}_covariance-er_f4_f45_lcmv.pkl').as_posix()
+
+    def get_lcmv_f4_f45_spatial_temporal_contrast_fname(self, **kwargs):
+        return self.mne_derivatives_dname.joinpath(
+            kwargs['subject'],
+            f'{kwargs["subject"]}'
+            f'_{kwargs["target_event_id"]}_covariance-er_f4_f45_lcmv_contrast.pkl').as_posix()
+
+    def get_lcmv_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
+        return f'lcmv_{kwargs["freq"]}_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test.pkl'
+
+    def get_lcmv_event_epochs_config(self):
+        tmin, tmax = -0.5, 2
+        tmin_plot, tmax_plot = -0.1, 1.75
+        return tmin, tmax, tmin_plot, tmax_plot
+
+    def get_lcmv_event_epochs_encoder(self, subject, task_selected, target_event_id):
+        """Get epochs time lock to encoder stimulus 2"""
+        self.logger.info('Get epochs time lock to encoder stimulus 2...')
+        recon_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
+        event_ids = list(np.unique(events[:,2]))
+        # fine-tune time length
+        tmin, tmax, tmin_plot, tmax_plot = self.get_lcmv_event_epochs_config()
+        baseline = None
+        logger.info(f"target event_id: {target_event_id}")
+        # remove the reject=dict(mag=1.5e-12) option, too much data point lost
+        epochs = mne.Epochs(recon_raw, events, target_event_id, tmin, tmax,
+                            baseline=baseline, picks='meg',
+                            preload=False)
+        return epochs
+
+    def get_lcmv_noise_cov(self, subject, target_event_id):
+        """Prepare empty room noise covariance used in lcmv method"""
+        from mne.event import make_fixed_length_events
+        self.logger.info('Prepare empty room noise covariance used in lcmv method')
+        raw_empty_room = filter_raw_empty_room(
+            subject, logger=self.logger)
+        # Create artificial events for empty room noise data
+        events_noise = make_fixed_length_events(raw_empty_room, target_event_id, duration=1.)
+        tmin, tmax, tmin_plot, tmax_plot = self.get_lcmv_event_epochs_config()
+        epochs_noise = mne.Epochs(raw_empty_room, events_noise, target_event_id, tmin, tmax)
+        return epochs_noise, raw_empty_room
+
+    def get_lcmv_solution(self, subject, task_selected, target_event_id):
+        # Make sure the number of noise epochs is the same as data epochs
+        tmin, tmax, tmin_plot, tmax_plot = self.get_lcmv_event_epochs_config()
+        epochs = \
+            self.get_lcmv_event_epochs_encoder(subject,
+                                               task_selected,
+                                               target_event_id)
+        epochs_noise, raw_noise = self.get_lcmv_noise_cov(subject, target_event_id)
+        epochs_noise = epochs_noise[:len(epochs.events)]
+        fwd_fname = self.get_fwd_fname(subject=subject)
+        forward = mne.read_forward_solution(fwd_fname)
+        # Setting frequency bins as in Dalal et al. 2008 (high gamma was subdivided)
+        # freq_bins = [(4, 12), (12, 30), (30, 55), (65, 299)]  # Hz
+        # corresponding to get_lcmv_fname
+        iter_freqs = [
+            ('Theta', 4, 7),
+            ('Alpha', 8, 12),
+            ('Beta', 13, 25),
+            ('Gamma', 30, 45)
+        ]
+        freq_bins = [(i[1], i[2]) for i in iter_freqs]
+        # corresponding to get_lcmv_f4_f45_fname
+        win_lengths = [0.3, 0.2, 0.15, 0.1]  # s
+        # Setting the time step
+        tstep = 0.05
+        # Setting the whitened data covariance regularization parameter
+        data_reg = 0.001
+        # Subtract evoked response prior to computation?
+        subtract_evoked = False
+        # Calculating covariance from empty room noise. To use baseline data as noise
+        # substitute raw for raw_noise, epochs.events for epochs_noise.events, tmin for
+        # desired baseline length, and 0 for tmax_plot.
+        # Note, if using baseline data, the averaged evoked response in the baseline
+        # period should be flat.
+        noise_covs = []
+        for (l_freq, h_freq) in freq_bins:
+            raw_band = raw_noise.copy()
+            raw_band.filter(l_freq, h_freq, n_jobs=1, fir_design='firwin')
+            epochs_band = mne.Epochs(raw_band, epochs_noise.events, target_event_id,
+                                     tmin=tmin_plot, tmax=tmax_plot, baseline=None,
+                                     proj=True, picks='meg')
+            noise_cov = mne.compute_covariance(epochs_band, method='shrunk', rank=None)
+            noise_covs.append(noise_cov)
+            del raw_band  # to save memory
+        # Computing LCMV solutions for time-frequency windows in a label in source
+        # space for faster computation, use label=None for full solution
+        stcs = mne.beamformer.tf_lcmv(
+            epochs, forward, noise_covs, tmin, tmax, tstep, win_lengths,
+            freq_bins=freq_bins, subtract_evoked=subtract_evoked,
+            reg=data_reg, rank=None)
+        return stcs
+
+    def save_lcmv_solution(self, subject, task_selected, target_event_id):
+        from devp_basicio import save_list_pkl
+        stcs = self.get_lcmv_solution(subject, task_selected, target_event_id)
+        # lcmv_fname = self.get_lcmv_fname(
+            # subject=subject, task_selected=task_selected,
+            # target_event_id=target_event_id)
+        lcmv_fname = self.get_lcmv_f4_f45_fname(
+            subject=subject, task_selected=task_selected,
+            target_event_id=target_event_id)
+        save_list_pkl(stcs, lcmv_fname, logger=self.logger)
+
+    def get_lcmv_spatial_temporal_contrast(self, subject, target_event_id):
+        from devp_basicio import load_list_pkl
+        task_stcs_dict = dict()
+        freq_stcs_contrast_dict = dict()
+        iter_freqs = [
+            ('Theta', 4, 7),
+            ('Alpha', 8, 12),
+            ('Beta', 13, 25),
+            ('Gamma', 30, 45)
+        ]
+        freq_bins = [i[0] for i in iter_freqs]
+        for task_selected in self.task_list:
+            # lcmv_fname = self.get_lcmv_fname(
+                # subject=subject, task_selected=task_selected,
+                # target_event_id=target_event_id)
+            lcmv_fname = self.get_lcmv_f4_f45_fname(
+                subject=subject, task_selected=task_selected,
+                target_event_id=target_event_id)
+            stcs = load_list_pkl(lcmv_fname, logger=self.logger)
+            task_stcs_dict[task_selected] = stcs
+        inv_fname = self.mne_derivatives_dname.joinpath(
+            subject, f'{subject}-inv.fif')
+        self.logger.info(f'Loading inv_fname: {inv_fname}')
+        inv = mne.minimum_norm.read_inverse_operator(inv_fname)
+        morph_mat, n_vertices_fsave = self.get_morphed_mat(subject, inv)
+        for i in range(len(stcs)):
+            freq_stcs_contrast_dict[freq_bins[i]] = \
+                morph_mat.dot(task_stcs_dict['spatial'][i].data) -\
+                morph_mat.dot(task_stcs_dict['temporal'][i].data)
+        return freq_stcs_contrast_dict
+
+    def save_lcmv_spatial_temporal_contrast(self, subject, target_event_id):
+        from devp_basicio import save_list_pkl
+        freq_stcs_contrast_dict = \
+            self.get_lcmv_spatial_temporal_contrast(subject, target_event_id)
+        contrast_fname = self.get_lcmv_f4_f45_spatial_temporal_contrast_fname(
+            subject=subject,
+            target_event_id=target_event_id)
+        save_list_pkl(freq_stcs_contrast_dict,
+                      contrast_fname, logger=self.logger)
+
+    def load_lcmv_spatial_temporal_contrast(self, subject, target_event_id):
+        from devp_basicio import load_list_pkl
+        contrast_fname = \
+        self.get_lcmv_f4_f45_spatial_temporal_contrast_fname(
+            subject=subject,
+            target_event_id=target_event_id)
+        freq_stcs_contrast_dict = load_list_pkl(
+            contrast_fname, logger=self.logger)
+        return freq_stcs_contrast_dict
+
+    def load_stacking_lcmv_spatial_temporal_contrast(self, subjects, target_event_id):
+        """Target_event_id: 253"""
+        from devp_basicio import load_list_pkl
+        _list = list()
+        for subject in subjects:
+            self.logger.info(f'Processing {subject} ...')
+            freq_stcs_contrast_dict = \
+            self.load_lcmv_spatial_temporal_contrast(
+                subject, target_event_id)
+            _list.append(freq_stcs_contrast_dict)
+        return _list, len(_list)
+
+    def _transform_to_training(self, _list):
+        """Transform list of dicts of frquency to training"""
+        from itertools import cycle
+        freq_iter = _list[0].keys()
+        array_dict = dict()
+        for freq in freq_iter:
+            array_dict[freq] = np.stack([j[freq] for j, freq in zip(_list, cycle([freq]))])
+        return array_dict
+
+    def lcmv_spatio_temporal_cluster_1samp_test(self, subjects, target_event):
+        """Target_event: sti2"""
+        print("test")
+        from devp_basicio import save_list_pkl
+        from scipy import stats as stats
+        from mne.stats import spatio_temporal_cluster_1samp_test
+        _list, n_subjects = self.load_stacking_lcmv_spatial_temporal_contrast(subjects, target_event)
+        self.logger.info('Computing connectivity.')
+        src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
+        src = mne.read_source_spaces(src_fname)
+        connectivity = mne.spatial_src_connectivity(src)
+        p_threshold = 1.0e-2
+        t_threshold = -stats.distributions.t.ppf(
+            p_threshold / 2., n_subjects - 1)
+        freq_iter = _list[0].keys()
+        freq_dict = self._transform_to_training(_list)
+        for freq in freq_iter:
+            X = freq_dict[freq]
+            X = np.transpose(X, [0, 2, 1])
+            self.logger.info(f'Clustering in band: {freq}')
+            T_obs, clusters, cluster_p_values, H0 = clu = \
+                spatio_temporal_cluster_1samp_test(
+                    X, connectivity=connectivity, n_jobs=1,
+                    threshold=t_threshold, buffer_size=None,
+                    verbose=True)
+            lcmv_spatio_temporal_cluster_1samp_test_fname = \
+                self.get_lcmv_spatio_temporal_cluster_1samp_test_fname(
+                    target_event=target_event, freq=freq)
+            save_list_pkl(clu, lcmv_spatio_temporal_cluster_1samp_test_fname, logger=self.logger)
+            # Now select the clusters that are sig. at p < 0.05 (note that this value
+            # is multiple-comparisons corrected).
+            good_cluster_inds = np.where(cluster_p_values < 0.05)[0]
+
+    def event_beamforming_lcmc(self, subject, task_selected, target_event):
+        from mne.beamformer import tf_lcmv
+        # Setting time limits for reading epochs. Note that tmin and tmax are set so
+        # that time-frequency beamforming will be performed for a wider range of time
+        # points than will later be displayed on the final spectrogram. This ensures
+        # that all time bins displayed represent an average of an equal number of time
+        # windows.
+        tmin, tmax = -0.1, 0.75  # s
+        tmin_plot, tmax_plot = -0.3, 0.5  # s
+        pass
 
 
 def devp_source_space():
@@ -1400,7 +1649,6 @@ def check_hsp(sub_index=None, task_selected=None):
 def main_source_space_exp_1():
     """Test empty as noise covariance"""
     sss = SourceSpaceStat()
-    from mne.parallel import parallel_func
     subjects = get_subjects_list()
     for subject in subjects:
         logger.info(f'Processing {subject} ...')
@@ -1423,7 +1671,6 @@ def main_source_space_exp_1():
 def main_source_space_exp_2():
     """Test baseline covariance"""
     sss = SourceSpaceStat2()
-    from mne.parallel import parallel_func
     subjects = get_subjects_list()
     for subject in subjects:
         logger.info(f'Processing {subject} ...')
@@ -1435,9 +1682,8 @@ def main_source_space_exp_2():
 
 
 def main_source_space_exp_3():
-    """Test baseline covariance sti1"""
+    """Test sti1 baseline covariance"""
     sss = SourceSpaceStat3()
-    from mne.parallel import parallel_func
     subjects = get_subjects_list()
     for subject in subjects:
         logger.info(f'Processing {subject} ...')
@@ -1445,7 +1691,38 @@ def main_source_space_exp_3():
             sss.prepare_event_baseline_noise_cov(subject, task_selected, 'sti2')
             sss.prepare_event_baseline_inverse_operator(subject, task_selected, 'sti2')
     sss.stack_stc_event_contrast(subjects, 'sti2')
-    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
+    def statstical_tests():
+        # sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
+        # not significant
+        # sss.event_permutation_cluster_1samp_test(subjects, 'sti2')
+        # memory limitation
+        pass
+    statstical_tests()
+    # sss.event_plot_spatio_temporal_cluster_1samp_test()
+
+
+def main_source_space_exp_4():
+    """Lcmv with covariance from empty room"""
+    from devp_basicio import define_id_by_aging_dict
+    aging_dict = define_id_by_aging_dict()
+    sss = SourceSpaceStat4()
+    subjects = get_subjects_list()
+    _subjects = list()
+    for subject in subjects:
+        logger.info(f'Processing {subject} ...')
+            # pick just young
+        if int(subject[-3:]) not in aging_dict['young']:
+            continue
+        _subjects.append(subject)
+    subjects = _subjects
+    for subject in subjects:
+        logger.info(f'Processing {subject} ...')
+        # for task_selected in sss.task_list:
+            # sss.save_lcmv_solution(subject, task_selected, 253)
+        # sss.stack_lcmv_solution(subjects)
+        # sss.get_lcmv_spatial_temporal_contrast(subject, 253)
+        # sss.save_lcmv_spatial_temporal_contrast(subject, 253)
+    sss.lcmv_spatio_temporal_cluster_1samp_test(subjects, 253)
 
 
 def main_source_space():
@@ -1481,8 +1758,9 @@ def main_source_space():
     # sss.sti2_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_hat_permutation_cluster_1samp_test(subjects)
     # sss.sti2_tfce_permutation_cluster_1samp_test(subjects)
-    sss.stack_stc_event_contrast(subjects, 'sti2')
-    sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
+    # sss.stack_stc_event_contrast(subjects, 'sti2')
+    # sss.event_spatio_temporal_cluster_1samp_test(subjects, 'sti2')
+    sss.event_plot_spatio_temporal_cluster_1samp_test()
     # parallel, run_func, _ = parallel_func(ss.prepare_source_space, n_jobs=n_jobs)
     # parallel(run_func(subject) for subject in subjects)
 
@@ -1490,7 +1768,8 @@ def main_source_space():
 def main():
     # devp_source_space()
     # main_source_space()
-    main_source_space_exp_3()
+    # main_source_space_exp_3()
+    main_source_space_exp_4()
 
 
 if __name__ == '__main__':
