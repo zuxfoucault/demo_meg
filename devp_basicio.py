@@ -824,6 +824,27 @@ def load_list_pkl(_file, logger=None):
     return _list
 
 
+def save_pkl(obj, _file, logger=None):
+    """_file: str"""
+    if logger is None:
+        logger = Logger()
+    logger.info('Save file:')
+    logger.info(f'{_file}')
+    with open(_file, 'wb') as f:
+        pickle.dump(obj, f)
+
+
+def load_pkl(_file, logger=None):
+    """_file: str"""
+    if logger is None:
+        logger = Logger()
+    logger.info('Load file:')
+    logger.info(f'{_file}')
+    with open(_file, 'rb') as f:
+        obj = pickle.load(f)
+    return obj
+
+
 def additional_loop():
     print('Staring test sub data')
     sub_index = 0
@@ -1008,7 +1029,7 @@ def devp_build_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
             frequency_map = load_list_pkl(_file)
             # print("add this")
             # print(frequency_map[0][1].data[0][0])
-            frequency_maps.append(frequency_map)
+            frequency_maps.appena(frequency_map)
             count += 1
             if count == 1:
                 grand_frequency_map = copy.deepcopy(frequency_map)
@@ -1528,10 +1549,10 @@ def plot_grand_gfp_contrast_spatial_temporal(file_rs, aging_label=None):
         """Return sum of squares."""
         return np.sum(x ** 2, axis=0)
     figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+    colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+    colors = colors[[0,2],:] # take 0:green, 2:blue
     for i_file_r, file_r in enumerate(file_rs):
-        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
-        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
-        colors = colors[[0,2],:] # take 0:green, 2:blue
         frequency_map = load_list_pkl(file_r)
         for ((freq_name, fmin, fmax), average), ax in zip(
                 frequency_map, axes.ravel()[::-1]):
