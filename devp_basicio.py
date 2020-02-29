@@ -26,6 +26,11 @@ except NameError:
 #fname = "/home/foucault/data/rawdata/working_memory/sub-106/meg/sub-106_task-Spat030102_meg.con"
 
 
+class Logger(object):
+    def __init__(self):
+        self.info = print
+
+
 def read_csv():
     import csv
     import codecs
@@ -757,7 +762,7 @@ def epochs_filter_by_trial(sub_index=None, task_selected=None):
     template_file = 'template_eog_component.csv'
     template_eog_component = np.loadtxt(template_file, delimiter=',')
     # corrmap([ica], template=template_eog_component, threshold=0.9, ch_type='mag')
-    corrmap([ica], template=template_eog_component, threshold=0.9, ch_type='mag',
+    corrmap([ica], template=template_eog_component, threshold=0.7, ch_type='mag',
             label='blink', plot=False)
     # __import__('IPython').embed()
     # __import__('sys').exit()
@@ -798,7 +803,7 @@ def epochs_filter_by_trial(sub_index=None, task_selected=None):
 
 def save_list_pkl(_list, _file, logger=None):
     if logger is None:
-        logger = logger
+        logger = Logger()
     root_dir = Path('/home/foucault/data/derivatives/working_memory/intermediate')
     file_w = root_dir.joinpath(_file)
     logger.info('save file')
@@ -808,6 +813,8 @@ def save_list_pkl(_list, _file, logger=None):
 
 
 def load_list_pkl(_file, logger=None):
+    if logger is None:
+        logger = Logger()
     root_dir = Path('/home/foucault/data/derivatives/working_memory/intermediate')
     file_r = root_dir.joinpath(_file)
     logger.info('load file')
@@ -1192,14 +1199,14 @@ def build_aging_grand_frequency_maps_pkl(sub_index=None, task_selected=None):
     id_list, exclude_list, data_concated_dict = define_id_list()
     aging_dict = define_id_by_aging_dict()
     for i in aging_variable:
-        if i == 'young':
+        if i == 'old':
             continue
         for task in task_selected:
             # if task == 'spatial':
                 # continue
             grand_frequency_map = append_grand_frequency_map(aging_dict[i], task)
             _file = f"{i}_grand_{task}_frequency_map.pkl"
-            save_list_pkl(frequency_map, _file)
+            save_list_pkl(grand_frequency_map, _file)
 
 
 def save_individual_aging_frequency_gfp_dict(sub_index=None, task_selected=None):
@@ -1509,6 +1516,50 @@ def plot_grand_gfp(task, file_r, aging_label=None):
         logger.info("saving file:")
         logger.info(f"{w_png.as_posix()}")
         fig.savefig(w_png, dpi=300)
+
+
+def plot_grand_gfp_contrast_spatial_temporal(file_rs, aging_label=None):
+    from mne.baseline import rescale
+    from mne.stats import bootstrap_confidence_interval
+    __import__('matplotlib').use('TkAgg')
+    import matplotlib.pyplot as plt
+    task_selected = ['spatial', 'temporal']
+    def stat_fun(x):
+        """Return sum of squares."""
+        return np.sum(x ** 2, axis=0)
+    figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+    for i_file_r, file_r in enumerate(file_rs):
+        fig, axes = plt.subplots(4, 1, figsize=(10, 7), sharex=True, sharey=True)
+        colors = plt.get_cmap('winter_r')(np.linspace(0, 1, 4))
+        colors = colors[[0,2],:] # take 0:green, 2:blue
+        frequency_map = load_list_pkl(file_r)
+        for ((freq_name, fmin, fmax), average), ax in zip(
+                frequency_map, axes.ravel()[::-1]):
+            times = average.times * 1e3
+            gfp = np.sum(average.data ** 2, axis=0)
+            gfp = mne.baseline.rescale(gfp, times, baseline=(None, 0))
+            ax.plot(times, gfp, label=freq_name, color=colors[i_file_r], linewidth=2.5)
+            ax.axhline(0, linestyle='--', color='grey', linewidth=2)
+            ci_low, ci_up = bootstrap_confidence_interval(average.data, random_state=0,
+                                                          stat_fun=stat_fun)
+            ci_low = rescale(ci_low, average.times, baseline=(None, 0))
+            ci_up = rescale(ci_up, average.times, baseline=(None, 0))
+            ax.fill_between(times, gfp + ci_up, gfp - ci_low, color=colors[i_file_r], alpha=0.3)
+            ax.grid(True)
+            ax.set_ylabel('GFP')
+            ax.annotate('%s (%d-%dHz)' % (freq_name, fmin, fmax),
+                        xy=(0.95, 0.8),
+                        horizontalalignment='right',
+                        xycoords='axes fraction')
+            ax.set_xlim(-100, 2000)
+        axes.ravel()[-1].set_xlabel('Time [ms]')
+    if aging_label:
+        w_png = figures_d.joinpath(f"{aging_label}_grand_gfp_contrast_spatial_temporal_dpi.png")
+    else:
+        w_png = figures_d.joinpath(f"grand_gfp_contrast_spatial_temporal_dpi.png")
+    logger.info("saving file:")
+    logger.info(f"{w_png.as_posix()}")
+    fig.savefig(w_png, dpi=300)
 
 
 def plot_grand_sig_clusterp_gfp(task, file_r, aging_label=None):
@@ -1913,6 +1964,22 @@ def plot_di_aging_grand_gfp():
             # plot_grand_theta_sig_ttest1samp_gfp(task, file_r, aging_label=i)
 
 
+def plot_aging_grand_gfp_contrast_spatial_temporal():
+    # Plot
+    task_selected = ['spatial', 'temporal']
+    aging_variable = ['young', 'elder']
+    file_rs = list()
+    for i in aging_variable:
+        if i == 'elder':
+            continue
+        for task in task_selected:
+            # if task == 'spatial':
+                # continue
+            file_r = f"{i}_grand_{task}_frequency_map.pkl"
+            file_rs.append(file_r)
+    plot_grand_gfp_contrast_spatial_temporal(file_rs, aging_label=i)
+
+
 def plot_theta_aging_grand_gfp():
     # Plot
     task_selected = ['spatial', 'temporal']
@@ -2036,11 +2103,11 @@ if __name__ == '__main__':
     # main_build_individual_frequency_map_pkl()
     # build_grand_frequency_maps_pkl()
     # build_aging_grand_frequency_maps_pkl()
-    plot_di_aging_grand_gfp()
+    # plot_di_aging_grand_gfp()
     # plot_theta_aging_grand_gfp()
     # build_individual_aging_frequency_gfp()
-    # build_aging_grand_frequency_maps_pkl()
     # collect_permutation_cluster_1samp_test()
     # collect_ttest_1samp()
     # build_individual_aging_frequency_gfp_dict()
     # save_individual_aging_frequency_gfp_dict(sub_index=None, task_selected=None)
+    plot_aging_grand_gfp_contrast_spatial_temporal()

@@ -96,6 +96,15 @@ def get_subjects_list(logger=None):
     return subjects
 
 
+def get_event_id_dict(logger=None):
+    if logger is None:
+        logger = Logger()
+    logger.info('Get event id dictionary')
+    return dict(
+        {'sti1': 254, 'sti2': 253, 'sti3': 251, 'sti4': 247,
+         'maintenance': 239, 'retrieval': 223})
+
+
 def _read_raw_bids(subject=None, task_selected=None):
     from mne_bids import read_raw_bids, make_bids_basename
     from devp_basicio import (read_id_task_dict, define_id_list,
@@ -238,6 +247,43 @@ def reconstruct_raw(subject=None, task_selected=None):
     filt_raw_em = raw_em.copy()
     filt_raw_em.load_data().filter(l_freq=1.5, h_freq=50)
     return reconst_raw, events, filt_raw_em
+
+
+def reconstruct_raw_w_file(
+    subject=None, task_selected=None, base_file=None, logger=None):
+    """Wrapper for reconstruct_raw to save and to retrieve files
+    If base_file is not assigned or files not existing,
+    preprocess will computing then"""
+    if logger is None:
+        logger = Logger()
+    if base_file:
+        reconst_raw_fname = base_file.joinpath(
+            f'{subject}', f'{subject}_{task_selected}_reconst_raw.fif')
+        events_fname = base_file.joinpath(
+            f'{subject}', f'{subject}_{task_selected}-eve.fif')
+        filt_em_raw_fname = base_file.joinpath(
+            f'{subject}', f'{subject}_{task_selected}_filter_em_raw.fif')
+        if (reconst_raw_fname.exists() and events_fname.exists()
+                and filt_em_raw_fname.exists()):
+            logger.info(f'Loading {reconst_raw_fname}')
+            reconst_raw = mne.io.read_raw_fif(reconst_raw_fname)
+            logger.info(f'Loading {events_fname}')
+            events = mne.read_events(events_fname)
+            logger.info(f'Loading {filt_em_raw_fname}')
+            filt_em_raw = mne.io.read_raw_fif(filt_em_raw_fname)
+            return reconst_raw, events, filt_em_raw
+        else:
+            reconst_raw, events, filt_em_raw = reconstruct_raw(subject, task_selected)
+            logger.info(f'Saving {reconst_raw_fname}')
+            reconst_raw.save(reconst_raw_fname.as_posix(), overwrite=True)
+            logger.info(f'Saving {events_fname}')
+            mne.write_events(events_fname.as_posix(), events)
+            logger.info(f'Saving {filt_em_raw_fname}')
+            filt_em_raw.save(filt_em_raw_fname.as_posix(), overwrite=True)
+            return reconst_raw, events, filt_em_raw
+    else:
+        reconst_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
+        return reconst_raw, events, filt_raw_em
 
 
 def filter_raw_empty_room(subject=None, task_selected=None, logger=None):
@@ -806,7 +852,7 @@ class SourceSpaceStat2(SourceSpaceStat):
 
     def get_event_epochs_encoder(self, subject, task_selected, target_event_id):
         """Get epochs time lock to encoder stimulus 2"""
-        self.logger.info('Get epochs time lock to encoder stimulus 2...')
+        self.logger.info('Get epochs time lock to encoder stimulus id {target_event_id}')
         recon_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
         event_ids = list(np.unique(events[:,2]))
         target_event_id, tmin, tmax = target_event_id, -0.1, 2
@@ -820,7 +866,7 @@ class SourceSpaceStat2(SourceSpaceStat):
 
     def get_event_epochs_baseline(self, subject, task_selected, target_event_id):
         """Get epochs time lock to encoder stimulus 2"""
-        self.logger.info('Get epochs time lock to encoder stimulus 2...')
+        self.logger.info('Get epochs time lock to encoder stimulus id {target_event_id}')
         recon_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
         event_ids = list(np.unique(events[:,2]))
         target_event_id, tmin, tmax = target_event_id, -1.5, 0
@@ -1150,6 +1196,12 @@ class SourceSpaceStat4(SourceSpaceStat2):
     def get_lcmv_spatio_temporal_cluster_1samp_test_fname(self, **kwargs):
         return f'lcmv_{kwargs["freq"]}_{kwargs["target_event"]}_spatio_temporal_cluster_1samp_test.pkl'
 
+    def get_plot_lcmv_freq_f4_f45_clusters_fname(self, **kwargs):
+        figures_d = Path("/home/foucault/data/derivatives/working_memory/intermediate/figure")
+        return figures_d.joinpath(
+            f'lcmv_{kwargs["freq"]}_{kwargs["target_event_id"]}_'
+            'f4_f45_covariance_er_clusters.png').as_posix()
+
     def get_lcmv_event_epochs_config(self):
         tmin, tmax = -0.5, 2
         tmin_plot, tmax_plot = -0.1, 1.75
@@ -1157,7 +1209,7 @@ class SourceSpaceStat4(SourceSpaceStat2):
 
     def get_lcmv_event_epochs_encoder(self, subject, task_selected, target_event_id):
         """Get epochs time lock to encoder stimulus 2"""
-        self.logger.info('Get epochs time lock to encoder stimulus 2...')
+        self.logger.info(f'Get epochs time lock to encoder stimulus id {target_event_id}')
         recon_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
         event_ids = list(np.unique(events[:,2]))
         # fine-tune time length
@@ -1223,7 +1275,7 @@ class SourceSpaceStat4(SourceSpaceStat2):
             epochs_band = mne.Epochs(raw_band, epochs_noise.events, target_event_id,
                                      tmin=tmin_plot, tmax=tmax_plot, baseline=None,
                                      proj=True, picks='meg')
-            noise_cov = mne.compute_covariance(epochs_band, method='shrunk', rank=None)
+            noise_cov = mne.compute_covariance(epochs_band, method='auto', rank=None)
             noise_covs.append(noise_cov)
             del raw_band  # to save memory
         # Computing LCMV solutions for time-frequency windows in a label in source
@@ -1328,7 +1380,7 @@ class SourceSpaceStat4(SourceSpaceStat2):
         src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
         src = mne.read_source_spaces(src_fname)
         connectivity = mne.spatial_src_connectivity(src)
-        p_threshold = 1.0e-2
+        p_threshold = 1.0e-1
         t_threshold = -stats.distributions.t.ppf(
             p_threshold / 2., n_subjects - 1)
         freq_iter = _list[0].keys()
@@ -1350,16 +1402,55 @@ class SourceSpaceStat4(SourceSpaceStat2):
             # is multiple-comparisons corrected).
             good_cluster_inds = np.where(cluster_p_values < 0.05)[0]
 
-    def event_beamforming_lcmc(self, subject, task_selected, target_event):
-        from mne.beamformer import tf_lcmv
-        # Setting time limits for reading epochs. Note that tmin and tmax are set so
-        # that time-frequency beamforming will be performed for a wider range of time
-        # points than will later be displayed on the final spectrogram. This ensures
-        # that all time bins displayed represent an average of an equal number of time
-        # windows.
-        tmin, tmax = -0.1, 0.75  # s
-        tmin_plot, tmax_plot = -0.3, 0.5  # s
-        pass
+    def plot_lcmv_spatio_temporal_cluster_1samp_test(self, target_event):
+        from mayavi import mlab
+        mlab.options.offscreen = True
+        from devp_basicio import load_list_pkl
+        from mne.stats import summarize_clusters_stc
+        target_event_id = target_event
+        iter_freqs = [
+            ('Theta', 4, 7),
+            ('Alpha', 8, 12),
+            ('Beta', 13, 25),
+            ('Gamma', 30, 45)
+        ]
+        freq_bins = [i[0] for i in iter_freqs]
+        for freq in freq_bins:
+            lcmv_spatio_temporal_cluster_1samp_test_fname = \
+                self.get_lcmv_spatio_temporal_cluster_1samp_test_fname(
+                    target_event=target_event, freq=freq)
+            clu = load_list_pkl(lcmv_spatio_temporal_cluster_1samp_test_fname, logger=self.logger)
+            T_obs, clusters, cluster_p_values, H0 = clu
+            self.logger.info('Visualizing clusters.')
+            # Now let's build a convenient representation of each cluster, where each
+            # cluster becomes a "time point" in the SourceEstimate
+            #epochs = self.get_epochs_encoder_sti2()
+            tstep = 0.001 # 1/epochs.info['sfreq']
+            src_fname = '/home/foucault/mne_data/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif'
+            src = mne.read_source_spaces(src_fname)
+            fsave_vertices = [s['vertno'] for s in src]
+            # stc_all_cluster_vis = summarize_clusters_stc(clu, tstep=tstep, p_thresh=0.05,
+                                                        # vertices=fsave_vertices,
+                                                        # subject='fsaverage')
+
+            # Let's actually plot the first "time point" in the SourceEstimate, which
+            # shows all the clusters, weighted by duration
+            # blue blobs are for condition A < condition B, red for A > B
+            # brain = stc_all_cluster_vis.plot(
+                # hemi='both', views='lateral', subjects_dir=self.SUBJECTS_DIR,
+                # time_label='Duration significant (ms)', size=(800, 800),
+                # smoothing_steps=5, clim=dict(kind='value', pos_lims=[0, 1, 40]))
+            p_thresh = cluster_p_values.min() + 0.02
+            self.logger.info(f'min cluster_p_values: {cluster_p_values.min()}')
+            self.logger.info(f'p_thresh: {p_thresh}')
+            stc_all_cluster_vis = summarize_clusters_stc(clu, tstep=tstep, p_thresh=p_thresh, vertices=fsave_vertices, subject='fsaverage')
+            brain = stc_all_cluster_vis.plot(hemi='split', views='lat', subjects_dir=self.SUBJECTS_DIR, time_label='Duration significant (ms)', size=(800, 800), smoothing_steps=5)
+            w_png = self.get_plot_lcmv_freq_f4_f45_clusters_fname(
+                freq=freq, target_event_id=target_event_id)
+            self.logger.info(f'saveing fig: {w_png}')
+            brain.save_image(w_png)
+            # __import__('IPython').embed()
+            # __import__('sys').exit()
 
 
 def devp_source_space():
@@ -1707,22 +1798,24 @@ def main_source_space_exp_4():
     aging_dict = define_id_by_aging_dict()
     sss = SourceSpaceStat4()
     subjects = get_subjects_list()
-    _subjects = list()
-    for subject in subjects:
-        logger.info(f'Processing {subject} ...')
-            # pick just young
-        if int(subject[-3:]) not in aging_dict['young']:
-            continue
-        _subjects.append(subject)
-    subjects = _subjects
-    for subject in subjects:
-        logger.info(f'Processing {subject} ...')
+    # for subject in subjects:
+        # logger.info(f'Processing {subject} ...')
         # for task_selected in sss.task_list:
             # sss.save_lcmv_solution(subject, task_selected, 253)
         # sss.stack_lcmv_solution(subjects)
         # sss.get_lcmv_spatial_temporal_contrast(subject, 253)
         # sss.save_lcmv_spatial_temporal_contrast(subject, 253)
-    sss.lcmv_spatio_temporal_cluster_1samp_test(subjects, 253)
+    _subjects = list()
+    for subject in subjects:
+            # pick just young
+        if int(subject[-3:]) not in aging_dict['young']:
+            logger.info(f'Filtering out {subject} ...')
+            continue
+        _subjects.append(subject)
+        logger.info(f'Appending {subject} ...')
+    subjects = _subjects
+    # sss.lcmv_spatio_temporal_cluster_1samp_test(subjects, 253)
+    sss.plot_lcmv_spatio_temporal_cluster_1samp_test(253)
 
 
 def main_source_space():
@@ -1769,7 +1862,12 @@ def main():
     # devp_source_space()
     # main_source_space()
     # main_source_space_exp_3()
-    main_source_space_exp_4()
+    # main_source_space_exp_4()
+    ss = SourceSpace()
+    base_file = ss.mne_derivatives_dname
+    reconstruct_raw_w_file(
+        subject='sub-104', task_selected='spatial',
+        base_file=base_file, logger=ss.logger)
 
 
 if __name__ == '__main__':
