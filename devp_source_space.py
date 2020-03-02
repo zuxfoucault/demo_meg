@@ -1444,7 +1444,7 @@ class SourceSpaceStat4(SourceSpaceStat2):
             self.logger.info(f'min cluster_p_values: {cluster_p_values.min()}')
             self.logger.info(f'p_thresh: {p_thresh}')
             stc_all_cluster_vis = summarize_clusters_stc(clu, tstep=tstep, p_thresh=p_thresh, vertices=fsave_vertices, subject='fsaverage')
-            brain = stc_all_cluster_vis.plot(hemi='split', views='lat', subjects_dir=self.SUBJECTS_DIR, time_label='Duration significant (ms)', size=(800, 800), smoothing_steps=5)
+            brain = stc_all_cluster_vis.plot(hemi='split', views='med', subjects_dir=self.SUBJECTS_DIR, time_label='Duration significant (ms)', size=(800, 800), smoothing_steps=5)
             w_png = self.get_plot_lcmv_freq_f4_f45_clusters_fname(
                 freq=freq, target_event_id=target_event_id)
             self.logger.info(f'saveing fig: {w_png}')
