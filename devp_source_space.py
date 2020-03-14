@@ -202,12 +202,12 @@ def reconstruct_raw(subject=None, task_selected=None):
 
     # Read eprime data
     df = _read_eprime_csv(subject)
-    indexed_event_id = 253
-    logger.info(f"indexed by event_id: {indexed_event_id}")
-    event_index = np.where(events[:][:,2]==indexed_event_id)[0] #n=63
+    target_event = 254 # onset of first sti
+    logger.info(f"indexed by event_id: {target_event}")
+    event_index = np.where(events[:][:,2]==target_event)[0] #n=63
     task_desc_dict = dict(zip(['spatial', 'temporal'], ['Spat', 'Temp']))
     acc = df[df['ExperimentName'].str.contains(task_desc_dict[task_selected])]['Probe.ACC']
-    acc_anno_index =  np.where(acc==0)[0]
+    acc_anno_index = np.where(acc==0)[0]
     if acc_anno_index.size == 0:
         acc_anno_index = np.array([len(event_index)-1])
     marked = event_index[acc_anno_index]
@@ -258,7 +258,8 @@ def reconstruct_raw_w_file(
         logger = Logger()
     if base_file:
         reconst_raw_fname = base_file.joinpath(
-            f'{subject}', f'{subject}_{task_selected}_reconst_raw.fif')
+            f'{subject}', f'{subject}_{task_selected}_'
+            'reconst_raw.fif')
         events_fname = base_file.joinpath(
             f'{subject}', f'{subject}_{task_selected}-eve.fif')
         filt_em_raw_fname = base_file.joinpath(
@@ -273,7 +274,8 @@ def reconstruct_raw_w_file(
             filt_em_raw = mne.io.read_raw_fif(filt_em_raw_fname)
             return reconst_raw, events, filt_em_raw
         else:
-            reconst_raw, events, filt_em_raw = reconstruct_raw(subject, task_selected)
+            reconst_raw, events, filt_em_raw = reconstruct_raw(
+                subject, task_selected)
             logger.info(f'Saving {reconst_raw_fname}')
             reconst_raw.save(reconst_raw_fname.as_posix(), overwrite=True)
             logger.info(f'Saving {events_fname}')
@@ -282,7 +284,8 @@ def reconstruct_raw_w_file(
             filt_em_raw.save(filt_em_raw_fname.as_posix(), overwrite=True)
             return reconst_raw, events, filt_em_raw
     else:
-        reconst_raw, events, filt_raw_em = reconstruct_raw(subject, task_selected)
+        reconst_raw, events, filt_raw_em = reconstruct_raw(
+            subject, task_selected)
         return reconst_raw, events, filt_raw_em
 
 

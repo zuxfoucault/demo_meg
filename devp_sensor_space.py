@@ -283,8 +283,54 @@ def main_sensor_space_plot3():
     ss.plot_tfr_mort_contrast(subjects, **kwargs)
 
 
+def main_sensor_space_plot4():
+    """Target event: sti3; id: 251"""
+    from devp_basicio import define_id_by_aging_dict
+    from devp_source_space import get_subjects_list
+    ss = SensorSpace()
+    ss.logger = logger
+    subjects = get_subjects_list()
+    aging_dict = define_id_by_aging_dict()
+    _subjects = list()
+    for subject in subjects:
+        # pick just young
+        if int(subject[-3:]) not in aging_dict['young']:
+            logger.info(f'Filtering out {subject} ...')
+            continue
+        _subjects.append(subject)
+        logger.info(f'Appending {subject} ...')
+    subjects = _subjects
+    target_event = 251
+    kwargs = dict(task=None, target_event=target_event)
+    ss.plot_tfr_mort_contrast(subjects, **kwargs)
+
+
+def main_sensor_space_plot5():
+    """Target event: sti4; id: 247"""
+    from devp_basicio import define_id_by_aging_dict
+    from devp_source_space import get_subjects_list
+    ss = SensorSpace()
+    ss.logger = logger
+    subjects = get_subjects_list()
+    aging_dict = define_id_by_aging_dict()
+    _subjects = list()
+    for subject in subjects:
+        # pick just young
+        if int(subject[-3:]) not in aging_dict['young']:
+            logger.info(f'Filtering out {subject} ...')
+            continue
+        _subjects.append(subject)
+        logger.info(f'Appending {subject} ...')
+    subjects = _subjects
+    target_event = 247
+    kwargs = dict(task=None, target_event=target_event)
+    ss.plot_tfr_mort_contrast(subjects, **kwargs)
+
+
 def main():
-    main_sensor_space_plot3()
+    # main_sensor_space_plot3()
+    main_sensor_space_plot4()
+    main_sensor_space_plot5()
 
 
 if __name__ == '__main__':
